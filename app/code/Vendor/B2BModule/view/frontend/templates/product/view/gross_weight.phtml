@@ -1,0 +1,19 @@
+<?php
+/**
+ * @var \Magento\Catalog\Block\Product\View\Description $block
+ * @var \Magento\Framework\Escaper $escaper
+ */
+
+$product = $block->getProduct();
+$grossWeight = $product->getData('gross_weight');
+$showGrossWeight = $block->getData('show_gross_weight') ?? true;
+
+if ($grossWeight && $showGrossWeight):
+?>
+<div class="product-info-gross-weight" data-role="gross-weight-container">
+    <div class="gross-weight-label">
+        <strong><?= $escaper->escapeHtml(__('Gross Weight (incl. packaging):')) ?></strong>
+        <span class="gross-weight-value"><?= $escaper->escapeHtml(number_format((float)$grossWeight, 2)) ?> kg</span>
+    </div>
+</div>
+<?php endif; ?>
