@@ -1,0 +1,26 @@
+<?xml version="1.0"?>
+<!--
+/**
+ * Copyright © Vendor. All rights reserved.
+ * See COPYING.txt for license details.
+ */
+-->
+<page xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+      xsi:noNamespaceSchemaLocation="urn:magento:framework:View/Layout/etc/page_configuration.xsd">
+    <body>
+        <referenceBlock name="product.info.main">
+            <block class="Magento\Catalog\Block\Product\View\Description"
+                   name="product.info.warranty_period"
+                   template="Vendor_B2BModule::product/view/warranty_period.phtml"
+                   after="product.info.price">
+                <arguments>
+                    <argument name="at_call" xsi:type="string">getWarrantyPeriod</argument>
+                    <argument name="at_code" xsi:type="string">warranty_period</argument>
+                    <argument name="css_class" xsi:type="string">warranty-period</argument>
+                    <argument name="at_label" xsi:type="string">default</argument>
+                    <argument name="add_attribute" xsi:type="string">itemprop="warranty"</argument>
+                </arguments>
+            </block>
+        </referenceBlock>
+    </body>
+</page>
