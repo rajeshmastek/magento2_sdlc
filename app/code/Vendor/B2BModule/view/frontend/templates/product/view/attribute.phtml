@@ -1,0 +1,28 @@
+<?php
+/**
+ * Copyright © Vendor. All rights reserved.
+ * See COPYING.txt for license details.
+ */
+
+/** @var \Magento\Catalog\Block\Product\View\Description $block */
+/** @var \Magento\Framework\Escaper $escaper */
+
+$product = $block->getProduct();
+$attributeCode = $block->getData('at_code');
+$attributeLabel = $block->getData('at_label');
+$cssClass = $block->getData('css_class');
+
+if (!$product || !$attributeCode) {
+    return;
+}
+
+$attributeValue = $product->getAttributeText($attributeCode);
+
+if (!$attributeValue) {
+    return;
+}
+?>
+<div class="product attribute <?= $escaper->escapeHtmlAttr($cssClass) ?>">
+    <strong class="type"><?= $escaper->escapeHtml($attributeLabel) ?>:</strong>
+    <div class="value"><?= $escaper->escapeHtml($attributeValue) ?></div>
+</div>

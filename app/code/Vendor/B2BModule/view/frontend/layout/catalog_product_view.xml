@@ -1,0 +1,27 @@
+<?xml version="1.0"?>
+<!--
+/**
+ * Copyright © Vendor. All rights reserved.
+ * See COPYING.txt for license details.
+ */
+-->
+<page xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+      xsi:noNamespaceSchemaLocation="urn:magento:framework:View/Layout/etc/page_configuration.xsd">
+    <body>
+        <referenceBlock name="product.info.details">
+            <block class="Magento\Catalog\Block\Product\View\Description"
+                   name="product.info.package_material"
+                   template="Vendor_B2BModule::product/view/attribute.phtml"
+                   group="detailed_info">
+                <arguments>
+                    <argument name="at_call" xsi:type="string">getPackageMaterial</argument>
+                    <argument name="at_code" xsi:type="string">package_material</argument>
+                    <argument name="css_class" xsi:type="string">package-material</argument>
+                    <argument name="at_label" xsi:type="string" translate="true">Package Material</argument>
+                    <argument name="title" translate="true" xsi:type="string">Package Material</argument>
+                    <argument name="sort_order" xsi:type="string">20</argument>
+                </arguments>
+            </block>
+        </referenceBlock>
+    </body>
+</page>
