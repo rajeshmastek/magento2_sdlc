@@ -1,0 +1,282 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+/**
+ * Copyright © Magento, Inc. All rights reserved.
+ * See COPYING.txt for license details.
+ */
+-->
+<tests xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+       xsi:noNamespaceSchemaLocation="urn:magento:mftf:Test/etc/testSchema.xsd">
+    <test name="AdminCreateWarrantyPeriodProductAttributeTest">
+        <annotations>
+            <features value="Catalog"/>
+            <stories value="As a catalog admin, I want to create a 'warranty_period' product attribute so that I can configure warranty information for each product in the catalog"/>
+            <title value="Create warranty_period product attribute with layered navigation and storefront visibility"/>
+            <description value="Verify that catalog admin can create warranty_period attribute with text field input type, store view scope, layered navigation enabled, and storefront visibility"/>
+            <severity value="CRITICAL"/>
+            <testCaseId value="AC-CATALOG-001"/>
+            <group value="catalog"/>
+            <group value="product_attribute"/>
+            <group value="eav"/>
+            <group value="layered_navigation"/>
+        </annotations>
+
+        <before>
+            <!-- Login as admin -->
+            <actionGroup ref="AdminLoginActionGroup" stepKey="loginAsAdmin"/>
+        </before>
+
+        <after>
+            <!-- Delete created attribute -->
+            <actionGroup ref="DeleteProductAttributeActionGroup" stepKey="deleteWarrantyAttribute">
+                <argument name="ProductAttribute" value="warrantyPeriodAttribute"/>
+            </actionGroup>
+            <actionGroup ref="CliIndexerReindexActionGroup" stepKey="reindexAfterDelete">
+                <argument name="indices" value=""/>
+            </actionGroup>
+            <actionGroup ref="CliCacheFlushActionGroup" stepKey="flushCacheAfterDelete">
+                <argument name="tags" value=""/>
+            </actionGroup>
+            <!-- Logout -->
+            <actionGroup ref="AdminLogoutActionGroup" stepKey="logout"/>
+        </after>
+
+        <!-- Navigate to Stores > Attributes > Product -->
+        <actionGroup ref="AdminOpenProductAttributePageActionGroup" stepKey="goToProductAttributePage"/>
+
+        <!-- Click 'Add New Attribute' -->
+        <actionGroup ref="AdminNavigateToNewProductAttributePageActionGroup" stepKey="clickAddNewAttribute"/>
+
+        <!-- Set Attribute Code to 'warranty_period' -->
+        <actionGroup ref="AdminFillProductAttributePropertiesActionGroup" stepKey="fillAttributeProperties">
+            <argument name="attributeCode" value="{{warrantyPeriodAttribute.attribute_code}}"/>
+            <argument name="defaultLabel" value="{{warrantyPeriodAttribute.default_frontend_label}}"/>
+        </actionGroup>
+
+        <!-- Set Catalog Input Type to 'Text Field' -->
+        <actionGroup ref="AdminSelectCatalogInputTypeForProductAttributeActionGroup" stepKey="selectTextFieldInputType">
+            <argument name="inputType" value="{{warrantyPeriodAttribute.frontend_input}}"/>
+        </actionGroup>
+
+        <!-- Set Scope to 'Store View' -->
+        <actionGroup ref="AdminSetProductAttributeScopeActionGroup" stepKey="setAttributeScope">
+            <argument name="scope" value="{{warrantyPeriodAttribute.scope}}"/>
+        </actionGroup>
+
+        <!-- Set 'Use in Layered Navigation' to 'Filterable (with results)' -->
+        <actionGroup ref="AdminSetProductAttributeLayeredNavigationActionGroup" stepKey="setLayeredNavigation">
+            <argument name="layeredNavigation" value="{{warrantyPeriodAttribute.is_filterable}}"/>
+        </actionGroup>
+
+        <!-- Set 'Visible on Catalog Pages on Storefront' to 'Yes' -->
+        <actionGroup ref="AdminSetProductAttributeVisibleOnStorefrontActionGroup" stepKey="setStorefrontVisibility">
+            <argument name="visible" value="{{warrantyPeriodAttribute.is_visible_on_front}}"/>
+        </actionGroup>
+
+        <!-- Add the attribute to 'Default' attribute set -->
+        <actionGroup ref="AdminProductAttributeAssignToAttributeSetActionGroup" stepKey="assignToDefaultAttributeSet">
+            <argument name="attributeSet" value="Default"/>
+        </actionGroup>
+
+        <!-- Save the attribute -->
+        <actionGroup ref="SaveProductAttributeActionGroup" stepKey="saveProductAttribute"/>
+
+        <!-- Verify success message -->
+        <actionGroup ref="AssertAdminProductAttributeSaveMessageActionGroup" stepKey="verifySuccessMessage"/>
+
+        <!-- Verify the warranty_period attribute should be created successfully -->
+        <actionGroup ref="AdminVerifyProductAttributeInGridActionGroup" stepKey="verifyAttributeInGrid">
+            <argument name="attributeCode" value="{{warrantyPeriodAttribute.attribute_code}}"/>
+        </actionGroup>
+
+        <!-- Verify the attribute should appear in the Default attribute set -->
+        <actionGroup ref="AdminOpenAttributeSetByNameActionGroup" stepKey="openDefaultAttributeSet">
+            <argument name="attributeSetName" value="Default"/>
+        </actionGroup>
+        <actionGroup ref="AdminVerifyAttributeInAttributeSetActionGroup" stepKey="verifyAttributeInSet">
+            <argument name="attributeCode" value="{{warrantyPeriodAttribute.attribute_code}}"/>
+        </actionGroup>
+
+        <!-- Run indexer reindex -->
+        <actionGroup ref="CliIndexerReindexActionGroup" stepKey="reindexCatalogProductAttribute">
+            <argument name="indices" value="catalog_product_attribute"/>
+        </actionGroup>
+
+        <!-- Run cache flush -->
+        <actionGroup ref="CliCacheFlushActionGroup" stepKey="flushCache">
+            <argument name="tags" value=""/>
+        </actionGroup>
+
+        <!-- Verify attribute is available for product assignment -->
+        <actionGroup ref="AdminOpenNewProductFormActionGroup" stepKey="openNewProductForm"/>
+        <actionGroup ref="AdminVerifyProductAttributeAvailableInFormActionGroup" stepKey="verifyAttributeAvailable">
+            <argument name="attributeCode" value="{{warrantyPeriodAttribute.attribute_code}}"/>
+        </actionGroup>
+    </test>
+</tests>
+```
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+/**
+ * Copyright © Magento, Inc. All rights reserved.
+ * See COPYING.txt for license details.
+ */
+-->
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+          xsi:noNamespaceSchemaLocation="urn:magento:mftf:DataGenerator/etc/dataProfileSchema.xsd">
+    <entity name="warrantyPeriodAttribute" type="ProductAttribute">
+        <data key="attribute_code">warranty_period</data>
+        <data key="default_frontend_label">Warranty Period</data>
+        <data key="frontend_input">text</data>
+        <data key="scope">store</data>
+        <data key="is_filterable">1</data>
+        <data key="is_filterable_in_search">1</data>
+        <data key="is_visible_on_front">1</data>
+        <data key="is_used_in_grid">1</data>
+        <data key="is_visible_in_grid">1</data>
+        <data key="is_filterable_in_grid">1</data>
+        <data key="used_in_product_listing">1</data>
+        <data key="backend_type">varchar</data>
+    </entity>
+</entities>
+```
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+/**
+ * Copyright © Magento, Inc. All rights reserved.
+ * See COPYING.txt for license details.
+ */
+-->
+<actionGroups xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+              xsi:noNamespaceSchemaLocation="urn:magento:mftf:Test/etc/actionGroupSchema.xsd">
+    
+    <actionGroup name="AdminSelectCatalogInputTypeForProductAttributeActionGroup">
+        <annotations>
+            <description>Select catalog input type for product attribute</description>
+        </annotations>
+        <arguments>
+            <argument name="inputType" type="string"/>
+        </arguments>
+        <selectOption selector="{{AttributePropertiesSection.InputType}}" userInput="{{inputType}}" stepKey="selectInputType"/>
+    </actionGroup>
+
+    <actionGroup name="AdminSetProductAttributeScopeActionGroup">
+        <annotations>
+            <description>Set product attribute scope</description>
+        </annotations>
+        <arguments>
+            <argument name="scope" type="string"/>
+        </arguments>
+        <selectOption selector="{{AttributePropertiesSection.Scope}}" userInput="{{scope}}" stepKey="selectScope"/>
+    </actionGroup>
+
+    <actionGroup name="AdminSetProductAttributeLayeredNavigationActionGroup">
+        <annotations>
+            <description>Set product attribute layered navigation option</description>
+        </annotations>
+        <arguments>
+            <argument name="layeredNavigation" type="string"/>
+        </arguments>
+        <click selector="{{StorefrontPropertiesSection.StoreFrontPropertiesTab}}" stepKey="goToStorefrontProperties"/>
+        <waitForElementVisible selector="{{StorefrontPropertiesSection.UseInLayeredNavigation}}" stepKey="waitForLayeredNavField"/>
+        <selectOption selector="{{StorefrontPropertiesSection.UseInLayeredNavigation}}" userInput="Filterable (with results)" stepKey="selectLayeredNavigation"/>
+    </actionGroup>
+
+    <actionGroup name="AdminSetProductAttributeVisibleOnStorefrontActionGroup">
+        <annotations>
+            <description>Set product attribute visible on storefront</description>
+        </annotations>
+        <arguments>
+            <argument name="visible" type="string"/>
+        </arguments>
+        <click selector="{{StorefrontPropertiesSection.StoreFrontPropertiesTab}}" stepKey="goToStorefrontPropertiesTab"/>
+        <waitForElementVisible selector="{{StorefrontPropertiesSection.VisibleOnCatalogPagesOnStorefront}}" stepKey="waitForVisibilityField"/>
+        <selectOption selector="{{StorefrontPropertiesSection.VisibleOnCatalogPagesOnStorefront}}" userInput="Yes" stepKey="setVisibleOnStorefront"/>
+    </actionGroup>
+
+    <actionGroup name="AdminProductAttributeAssignToAttributeSetActionGroup">
+        <annotations>
+            <description>Assign product attribute to attribute set</description>
+        </annotations>
+        <arguments>
+            <argument name="attributeSet" type="string"/>
+        </arguments>
+        <click selector="{{AttributePropertiesSection.AdvancedProperties}}" stepKey="expandAdvancedProperties"/>
+        <waitForElementVisible selector="{{AttributePropertiesSection.AttributeSet}}" stepKey="waitForAttributeSetField"/>
+        <selectOption selector="{{AttributePropertiesSection.AttributeSet}}" userInput="{{attributeSet}}" stepKey="selectAttributeSet"/>
+    </actionGroup>
+
+    <actionGroup name="AssertAdminProductAttributeSaveMessageActionGroup">
+        <annotations>
+            <description>Verify product attribute save success message</description>
+        </annotations>
+        <waitForElementVisible selector="{{AdminMessagesSection.success}}" stepKey="waitForSuccessMessage"/>
+        <see selector="{{AdminMessagesSection.success}}" userInput="You saved the product attribute." stepKey="seeSuccessMessage"/>
+    </actionGroup>
+
+    <actionGroup name="AdminVerifyProductAttributeInGridActionGroup">
+        <annotations>
+            <description>Verify product attribute exists in grid</description>
+        </annotations>
+        <arguments>
+            <argument name="attributeCode" type="string"/>
+        </arguments>
+        <actionGroup ref="AdminOpenProductAttributePageActionGroup" stepKey="navigateToAttributeGrid"/>
+        <fillField selector="{{AdminProductAttributeGridSection.FilterByAttributeCode}}" userInput="{{attributeCode}}" stepKey="fillAttributeCodeFilter"/>
+        <click selector="{{AdminProductAttributeGridSection.Search}}" stepKey="clickSearch"/>
+        <waitForPageLoad stepKey="waitForGridLoad"/>
+        <see selector="{{AdminProductAttributeGridSection.FirstRow}}" userInput="{{attributeCode}}" stepKey="seeAttributeInGrid"/>
+    </actionGroup>
+
+    <actionGroup name="AdminOpenAttributeSetByNameActionGroup">
+        <annotations>
+            <description>Open attribute set by name</description>
+        </annotations>
+        <arguments>
+            <argument name="attributeSetName" type="string"/>
+        </arguments>
+        <amOnPage url="{{AdminProductAttributeSetGridPage.url}}" stepKey="goToAttributeSetPage"/>
+        <waitForPageLoad stepKey="waitForAttributeSetPage"/>
+        <fillField selector="{{AdminProductAttributeSetGridSection.filter}}" userInput="{{attributeSetName}}" stepKey="filterByName"/>
+        <click selector="{{AdminProductAttributeSetGridSection.searchBtn}}" stepKey="clickSearch"/>
+        <waitForPageLoad stepKey="waitForSearchResults"/>
+        <click selector="{{AdminProductAttributeSetGridSection.firstRow}}" stepKey="clickFirstRow"/>
+        <waitForPageLoad stepKey="waitForAttributeSetEdit"/>
+    </actionGroup>
+
+    <actionGroup name="AdminVerifyAttributeInAttributeSetActionGroup">
+        <annotations>
+            <description>Verify attribute exists in attribute set</description>
+        </annotations>
+        <arguments>
+            <argument name="attributeCode" type="string"/>
+        </arguments>
+        <waitForElementVisible selector="{{AdminProductAttributeSetEditSection.unassignedAttributes}}" stepKey="waitForUnassignedAttributes"/>
+        <see selector="{{AdminProductAttributeSetEditSection.assignedAttributes}}" userInput="{{attributeCode}}" stepKey="seeAttributeInSet"/>
+    </actionGroup>
+
+    <actionGroup name="AdminOpenNewProductFormActionGroup">
+        <annotations>
+            <description>Open new product form</description>
+        </annotations>
+        <amOnPage url="{{AdminProductCreatePage.url(AddProductType.simple, AddProductSet.default)}}" stepKey="navigateToNewProductPage"/>
+        <waitForPageLoad stepKey="waitForProductPage"/>
+    </actionGroup>
+
+    <actionGroup name="AdminVerifyProductAttributeAvailableInFormActionGroup">
+        <annotations>
+            <description>Verify product attribute is available in product form</description>
+        </annotations>
+        <arguments>
+            <argument name="attributeCode" type="string"/>
+        </arguments>
+        <scrollTo selector="{{AdminProductFormSection.contentTab}}" stepKey="scrollToContentTab"/>
+        <conditionalClick selector="{{AdminProductFormSection.contentTab}}" dependentSelector="{{AdminProductFormSection.contentTabOpen}}" visible="false" stepKey="openContentTab"/>
+        <waitForElementVisible selector="//input[@name='product[{{attributeCode}}]'] | //textarea[@name='product[{{attributeCode}}]'] | //select[@name='product[{{attributeCode}}]']" stepKey="waitForAttributeField"/>
+        <seeElement selector="//input[@name='product[{{attributeCode}}]'] | //textarea[@name='product[{{attributeCode}}]'] | //select[@name='product[{{attributeCode}}]']" stepKey="seeAttributeField"/>
+    </actionGroup>
+</actionGroups>
