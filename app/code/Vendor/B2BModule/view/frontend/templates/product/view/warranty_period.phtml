@@ -1,0 +1,21 @@
+<?php
+/**
+ * Copyright © Vendor. All rights reserved.
+ * See COPYING.txt for license details.
+ */
+
+/** @var \Magento\Catalog\Block\Product\View\Description $block */
+/** @var \Magento\Framework\Escaper $escaper */
+
+$warrantyPeriod = $block->getProduct()->getData('warranty_period');
+?>
+<?php if ($warrantyPeriod): ?>
+    <div class="product-warranty-period" data-role="warranty-period">
+        <div class="warranty-label">
+            <strong><?= $escaper->escapeHtml(__('Warranty Period:')) ?></strong>
+        </div>
+        <div class="warranty-value" itemprop="warranty">
+            <?= $escaper->escapeHtml($warrantyPeriod) ?>
+        </div>
+    </div>
+<?php endif; ?>
