@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<tests xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+       xsi:noNamespaceSchemaLocation="urn:magento:mftf:Test/etc/testSchema.xsd">
+    <test name="ModuleUS001Test">
+        <annotations>
+            <features value="Vendor_Module"/>
+            <title value="Create Package Material Product Attribute"/>
+            <description value="Verify Create Package Material Product Attribute"/>
+            <severity value="MAJOR"/>
+            <testCaseId value="US-001"/>
+            <group value="module"/>
+        </annotations>
+        <before>
+            <actionGroup ref="AdminLoginActionGroup" stepKey="loginAsAdmin"/>
+        </before>
+        <after>
+            <actionGroup ref="AdminLogoutActionGroup" stepKey="logoutFromAdmin"/>
+        </after>
+        <amOnPage url="{{AdminProductAttributeGridPage.url}}" stepKey="navigateToProductAttributeGrid"/>
+        <waitForPageLoad stepKey="waitForAttributeGridPageLoad"/>
+        <click selector="{{AdminProductAttributeGridSection.createNewAttributeBtn}}" stepKey="clickAddNewAttribute"/>
+        <waitForPageLoad stepKey="waitForNewAttributePageLoad"/>
+        <fillField selector="{{AttributePropertiesSection.DefaultLabel}}" userInput="Package Material" stepKey="fillAttributeLabel"/>
+        <fillField selector="{{AdvancedAttributePropertiesSection.AttributeCode}}" userInput="package_material" stepKey="fillAttributeCode"/>
+        <selectOption selector="{{AttributePropertiesSection.InputType}}" userInput="Dropdown" stepKey="selectDropdownInputType"/>
+        <waitForPageLoad stepKey="waitForInputTypeChange"/>
+        <click selector="{{StorefrontPropertiesSection.StoreFrontPropertiesTab}}" stepKey="clickStorefrontPropertiesTab"/>
+        <waitForPageLoad stepKey="waitForStorefrontPropertiesTab"/>
+        <selectOption selector="{{StorefrontPropertiesSection.UseInLayeredNavigation}}" userInput="Filterable (with results)" stepKey="setFilterableWithResults"/>
+        <selectOption selector="{{StorefrontPropertiesSection.VisibleOnCatalogPagesOnStorefront}}" userInput="Yes" stepKey="setVisibleOnStorefront"/>
+        <selectOption selector="{{StorefrontPropertiesSection.UsedInProductListing}}" userInput="Yes" stepKey="setUsedInProductListing"/>
+        <selectOption selector="{{StorefrontPropertiesSection.UsedForPromoRuleConditions}}" userInput="Yes" stepKey="setUsedForPromoRules"/>
+        <selectOption selector="{{StorefrontPropertiesSection.UseInSearch}}" userInput="Yes" stepKey="setUseInSearch"/>
+        <selectOption selector="{{StorefrontPropertiesSection.ComparableOnStorefront}}" userInput="Yes" stepKey="setComparableOnStorefront"/>
+        <click selector="{{AttributePropertiesSection.ManageOptions}}" stepKey="clickManageOptions"/>
+        <waitForPageLoad stepKey="waitForManageOptionsSection"/>
+        <click selector="{{AttributePropertiesSection.AddOption}}" stepKey="clickAddOptionOne"/>
+        <fillField selector="{{AttributePropertiesSection.AdminOptionValue('0')}}" userInput="Cardboard" stepKey="fillOptionCardboard"/>
+        <fillField selector="{{AttributePropertiesSection.OptionSortOrder('0')}}" userInput="10" stepKey="setSortOrderCardboard"/>
+        <click selector="{{AttributePropertiesSection.AddOption}}" stepKey="clickAddOptionTwo"/>
+        <fillField selector="{{AttributePropertiesSection.AdminOptionValue('1')}}" userInput="Plastic" stepKey="fillOptionPlastic"/>
+        <fillField selector="{{AttributePropertiesSection.OptionSortOrder('1')}}" userInput="20" stepKey="setSortOrderPlastic"/>
+        <click selector="{{AttributePropertiesSection.AddOption}}" stepKey="clickAddOptionThree"/>
+        <fillField selector="{{AttributePropertiesSection.AdminOptionValue('2')}}" userInput="Biodegradable" stepKey="fillOptionBiodegradable"/>
+        <fillField selector="{{AttributePropertiesSection.OptionSortOrder('2')}}" userInput="30" stepKey="setSortOrderBiodegradable"/>
+        <click selector="{{AttributePropertiesSection.AddOption}}" stepKey="clickAddOptionFour"/>
+        <fillField selector="{{AttributePropertiesSection.AdminOptionValue('3')}}" userInput="Metal" stepKey="fillOptionMetal"/>
+        <fillField selector="{{AttributePropertiesSection.OptionSortOrder('3')}}" userInput="40" stepKey="setSortOrderMetal"/>
+        <click selector="{{AttributePropertiesSection.AddOption}}" stepKey="clickAddOptionFive"/>
+        <fillField selector="{{AttributePropertiesSection.AdminOptionValue('4')}}" userInput="Glass" stepKey="fillOptionGlass"/>
+        <fillField selector="{{AttributePropertiesSection.OptionSortOrder('4')}}" userInput="50" stepKey="setSortOrderGlass"/>
+        <click selector="{{AttributePropertiesSection.AddOption}}" stepKey="clickAddOptionSix"/>
+        <fillField selector="{{AttributePropertiesSection.AdminOptionValue('5')}}" userInput="Mixed Materials" stepKey="fillOptionMixedMaterials"/>
+        <fillField selector="{{AttributePropertiesSection.OptionSortOrder('5')}}" userInput="60" stepKey="setSortOrderMixedMaterials"/>
+        <click selector="{{AttributePropertiesSection.AdvancedProperties}}" stepKey="clickAdvancedProperties"/>
+        <waitForPageLoad stepKey="waitForAdvancedPropertiesSection"/>
+        <click selector="{{AdvancedAttributePropertiesSection.AddToDefaultAttributeSet}}" stepKey="addToDefaultAttributeSet"/>
+        <click selector="{{AttributePropertiesSection.Save}}" stepKey="saveAttribute"/>
+        <waitForPageLoad stepKey="waitForAttributeSave"/>
+        <see selector="{{AdminMessagesSection.success}}" userInput="You saved the product attribute." stepKey="seeSuccessMessage"/>
+        <amOnPage url="{{AdminProductAttributeGridPage.url}}" stepKey="navigateBackToAttributeGrid"/>
+        <waitForPageLoad stepKey="waitForAttributeGridReload"/>
+        <fillField selector="{{AdminProductAttributeGridSection.FilterByAttributeCode}}" userInput="package_material" stepKey="filterByAttributeCode"/>
+        <click selector="{{AdminProductAttributeGridSection.Search}}" stepKey="clickSearch"/>
+        <waitForPageLoad stepKey="waitForSearchResults"/>
+        <see selector="{{AdminProductAttributeGridSection.attributeCodeColumn}}" userInput="package_material" stepKey="seeAttributeInGrid"/>
+    </test>
+</tests>
