@@ -1,0 +1,17 @@
+<?xml version="1.0"?>
+<!--
+/**
+ * Copyright © Vendor. All rights reserved.
+ * See COPYING.txt for license details.
+ */
+-->
+<config xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="urn:magento:framework:ObjectManager/etc/config.xsd">
+    <!-- Optional: Add plugin for warranty period validation -->
+    <type name="Magento\Catalog\Model\Product">
+        <plugin name="vendor_b2bmodule_warranty_period_validation"
+                type="Vendor\B2BModule\Plugin\Product\Attribute\WarrantyPeriodValidationPlugin"
+                sortOrder="10"
+                disabled="false"/>
+    </type>
+</config>
