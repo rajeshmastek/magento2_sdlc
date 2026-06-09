@@ -156,36 +156,28 @@ jobs:
       # ── Summary ──────────────────────────────────────────────────────────────
       - name: Test results summary
         if: always()
+        working-directory: playwright
         run: |
-          if [ -f "playwright/test-results/results.json" ]; then
-            python3 -c "
-import json, sys
-with open('playwright/test-results/results.json') as f:
-    r = json.load(f)
-suites = r.get('suites', [])
-passed = failed = skipped = 0
-def count(s):
-    global passed, failed, skipped
-    for spec in s.get('specs',[]):
-        for t in spec.get('tests',[]):
-            status = t.get('status','unexpected')
-            if status == 'expected':    passed += 1
-            elif status == 'skipped':   skipped += 1
-            else:                       failed += 1
-    for child in s.get('suites',[]): count(child)
-for s in suites: count(s)
-total = passed + failed + skipped
-print(f'## Playwright Test Results')
-print(f'| Status  | Count |')
-print(f'|---------|-------|')
-print(f'| ✅ Passed  | {passed} |')
-print(f'| ❌ Failed  | {failed} |')
-print(f'| ⏭ Skipped | {skipped} |')
-print(f'| Total   | {total} |')
-if failed > 0:
-    print(f'\n⚠️ {failed} test(s) failed')
-    sys.exit(1)
-else:
-    print(f'\n✅ All {passed} tests passed')
-" >> $GITHUB_STEP_SUMMARY || true
+          if [ ! -f "test-results/results.json" ]; then
+            echo "No results file" >> $GITHUB_STEP_SUMMARY
+            exit 0
+          fi
+          PASSED=$(python3 -c "import json; r=json.load(open('test-results/results.json')); \
+            def c(s,a): \
+              [a.update({t.get('status'):a.get(t.get('status'),0)+1}) for sp in s.get('specs',[]) for t in sp.get('tests',[])];\
+              [c(ch,a) for ch in s.get('suites',[])] \
+            ; a={}; [c(s,a) for s in r.get('suites',[])];\
+            print(a.get('expected',0),a.get('unexpected',0)+a.get('failed',0),a.get('skipped',0))")
+          read PASS FAIL SKIP <<< "$PASSED"
+          TOTAL=$((PASS + FAIL + SKIP))
+          echo "## Playwright Test Results" >> $GITHUB_STEP_SUMMARY
+          echo "| Status | Count |" >> $GITHUB_STEP_SUMMARY
+          echo "|--------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Passed  | $PASS |" >> $GITHUB_STEP_SUMMARY
+          echo "| Failed  | $FAIL |" >> $GITHUB_STEP_SUMMARY
+          echo "| Skipped | $SKIP |" >> $GITHUB_STEP_SUMMARY
+          echo "| Total   | $TOTAL |" >> $GITHUB_STEP_SUMMARY
+          if [ "$FAIL" -gt "0" ]; then
+            echo "::error::$FAIL Playwright test(s) failed"
+            exit 1
           fi
