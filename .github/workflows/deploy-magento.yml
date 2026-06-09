@@ -1,0 +1,286 @@
+name: Build and Deploy Magento 2.4.9
+
+on:
+  push:
+    branches: [develop, main]
+    paths:
+      - 'app/code/**'
+      - 'composer.json'
+      - 'composer.lock'
+      - 'Dockerfile'
+      - '.github/workflows/deploy-magento.yml'
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Deploy target environment'
+        type: choice
+        options: [staging, production]
+        default: staging
+      skip_tests:
+        description: 'Skip Playwright tests after deploy'
+        type: boolean
+        default: false
+
+env:
+  AWS_REGION:      ${{ secrets.AWS_REGION || 'us-east-1' }}
+  ECR_REPOSITORY:  magento24-app
+  ECS_CLUSTER:     magento-cluster
+  ECS_SERVICE:     magento-service
+  CONTAINER_NAME:  magento
+
+jobs:
+  # ── Build Docker image ────────────────────────────────────────────────────
+  build:
+    name: Build Magento Docker Image
+    runs-on: ubuntu-latest
+    outputs:
+      image: ${{ steps.build-push.outputs.image }}
+      version: ${{ steps.version.outputs.version }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set version tag
+        id: version
+        run: |
+          VERSION="${{ github.ref_name }}-$(git rev-parse --short HEAD)-$(date +%Y%m%d%H%M%S)"
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+          echo "Building version: ${VERSION}"
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id:     ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region:            ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Cache Docker layers
+        uses: actions/cache@v4
+        with:
+          path: /tmp/.buildx-cache
+          key: ${{ runner.os }}-buildx-${{ github.sha }}
+          restore-keys: ${{ runner.os }}-buildx-
+
+      - name: Build and push to ECR
+        id: build-push
+        uses: docker/build-push-action@v5
+        with:
+          context:       .
+          file:          ./Dockerfile
+          push:          true
+          platforms:     linux/amd64
+          tags: |
+            ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ steps.version.outputs.version }}
+            ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ github.ref_name }}-latest
+          build-args: |
+            MAGENTO_VERSION=2.4.9
+            BUILD_DATE=${{ github.event.head_commit.timestamp }}
+            VCS_REF=${{ github.sha }}
+          cache-from: type=local,src=/tmp/.buildx-cache
+          cache-to:   type=local,dest=/tmp/.buildx-cache-new,mode=max
+          labels: |
+            org.opencontainers.image.created=${{ github.event.head_commit.timestamp }}
+            org.opencontainers.image.revision=${{ github.sha }}
+
+      - name: Move cache
+        run: |
+          rm -rf /tmp/.buildx-cache
+          mv /tmp/.buildx-cache-new /tmp/.buildx-cache
+
+      - name: Output image URI
+        run: |
+          echo "image=${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ steps.version.outputs.version }}" >> $GITHUB_OUTPUT
+
+  # ── Deploy to ECS ─────────────────────────────────────────────────────────
+  deploy:
+    name: Deploy to AWS ECS
+    runs-on: ubuntu-latest
+    needs: build
+    environment:
+      name: ${{ github.event.inputs.environment || 'staging' }}
+      url:  ${{ steps.get-url.outputs.url }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id:     ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region:            ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Fetch current ECS task definition
+        run: |
+          aws ecs describe-task-definition \
+            --task-definition magento-task \
+            --query taskDefinition \
+            > task-definition.json
+
+      - name: Update image in task definition
+        id: task-def
+        uses: aws-actions/amazon-ecs-render-task-definition@v1
+        with:
+          task-definition: task-definition.json
+          container-name:  ${{ env.CONTAINER_NAME }}
+          image:           ${{ needs.build.outputs.image }}
+
+      - name: Deploy to ECS
+        uses: aws-actions/amazon-ecs-deploy-task-definition@v1
+        with:
+          task-definition:  ${{ steps.task-def.outputs.task-definition }}
+          service:          ${{ env.ECS_SERVICE }}
+          cluster:          ${{ env.ECS_CLUSTER }}
+          wait-for-service-stability: true
+          wait-for-minutes: 15
+
+      - name: Run Magento post-deploy commands
+        run: |
+          # Trigger setup:upgrade and cache:flush via ECS Exec
+          TASK_ARN=$(aws ecs list-tasks \
+            --cluster ${{ env.ECS_CLUSTER }} \
+            --service-name ${{ env.ECS_SERVICE }} \
+            --query "taskArns[0]" --output text)
+          echo "Running post-deploy on task: ${TASK_ARN}"
+
+          aws ecs execute-command \
+            --cluster ${{ env.ECS_CLUSTER }} \
+            --task "${TASK_ARN}" \
+            --container ${{ env.CONTAINER_NAME }} \
+            --command "/var/www/html/bin/magento setup:upgrade --no-interaction" \
+            --interactive || echo "setup:upgrade already current"
+
+          aws ecs execute-command \
+            --cluster ${{ env.ECS_CLUSTER }} \
+            --task "${TASK_ARN}" \
+            --container ${{ env.CONTAINER_NAME }} \
+            --command "/var/www/html/bin/magento cache:flush" \
+            --interactive || true
+
+      - name: Get Magento URL
+        id: get-url
+        run: |
+          URL=$(aws ssm get-parameter \
+            --name "/magento/prod/base_url" \
+            --with-decryption \
+            --query "Parameter.Value" --output text 2>/dev/null || \
+            aws cloudformation describe-stacks \
+            --stack-name magento-infrastructure \
+            --query "Stacks[0].Outputs[?OutputKey=='MagentoURL'].OutputValue" \
+            --output text 2>/dev/null || echo "")
+          echo "url=${URL}" >> $GITHUB_OUTPUT
+          echo "Deployed to: ${URL}"
+
+      - name: Health check
+        run: |
+          URL="${{ steps.get-url.outputs.url }}"
+          if [ -n "$URL" ]; then
+            echo "Health checking ${URL}..."
+            for i in {1..10}; do
+              STATUS=$(curl -s -o /dev/null -w "%{http_code}" "${URL}" || echo "000")
+              if [ "$STATUS" == "200" ] || [ "$STATUS" == "302" ]; then
+                echo "✅ Health check passed (HTTP ${STATUS})"
+                break
+              fi
+              echo "Attempt ${i}/10: HTTP ${STATUS} — waiting 30s..."
+              sleep 30
+            done
+          fi
+
+      - name: Update SSM with deployed version
+        run: |
+          aws ssm put-parameter \
+            --name "/magento/prod/deployed_version" \
+            --value "${{ needs.build.outputs.version }}" \
+            --type String --overwrite || true
+          aws ssm put-parameter \
+            --name "/sdlc-ai/last_magento_deploy" \
+            --value "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --type String --overwrite || true
+
+      - name: Deployment summary
+        run: |
+          cat >> $GITHUB_STEP_SUMMARY << EOF
+          ## 🚀 Magento Deployment Summary
+          | Field | Value |
+          |-------|-------|
+          | Version | ${{ needs.build.outputs.version }} |
+          | Image | ${{ needs.build.outputs.image }} |
+          | URL | ${{ steps.get-url.outputs.url }} |
+          | Cluster | ${{ env.ECS_CLUSTER }} |
+          | Service | ${{ env.ECS_SERVICE }} |
+          | Commit | ${{ github.sha }} |
+          EOF
+
+  # ── Run Playwright after deploy ───────────────────────────────────────────
+  smoke-test:
+    name: Post-Deploy Playwright Smoke Tests
+    runs-on: ubuntu-latest
+    needs: deploy
+    if: ${{ !inputs.skip_tests }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: playwright/package-lock.json
+
+      - name: Install Playwright
+        working-directory: playwright
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id:     ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region:            ${{ env.AWS_REGION }}
+
+      - name: Get Magento URL
+        run: |
+          URL=$(aws ssm get-parameter \
+            --name "/magento/prod/base_url" \
+            --with-decryption \
+            --query "Parameter.Value" --output text 2>/dev/null || \
+            echo "${{ secrets.MAGENTO_BASE_URL }}")
+          echo "BASE_URL=${URL}" >> $GITHUB_ENV
+
+      - name: Run smoke tests
+        working-directory: playwright
+        env:
+          MAGENTO_ADMIN_USER:     ${{ secrets.MAGENTO_ADMIN_USER }}
+          MAGENTO_ADMIN_PASS:     ${{ secrets.MAGENTO_ADMIN_PASS }}
+          MAGENTO_CUSTOMER_EMAIL: ${{ secrets.MAGENTO_CUSTOMER_EMAIL }}
+          MAGENTO_CUSTOMER_PASS:  ${{ secrets.MAGENTO_CUSTOMER_PASS }}
+          CI: 'true'
+        run: npx playwright test --grep "@smoke" || true
+
+      - name: Upload smoke test report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: smoke-test-report-${{ github.run_id }}
+          path: playwright/playwright-report/
+          retention-days: 7

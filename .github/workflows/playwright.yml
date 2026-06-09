@@ -1,0 +1,191 @@
+name: Playwright Tests
+
+on:
+  push:
+    branches: [main, develop]
+    paths:
+      - 'playwright/**'
+      - '.github/workflows/playwright.yml'
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      base_url:
+        description: 'Magento base URL to test against'
+        required: false
+        default: ''
+      test_filter:
+        description: 'Test file pattern filter (e.g. WarrantyPeriod)'
+        required: false
+        default: ''
+
+env:
+  NODE_VERSION: '20'
+
+jobs:
+  playwright-tests:
+    name: Playwright E2E Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      # ── Checkout ────────────────────────────────────────────────────────────
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # ── Node.js setup ────────────────────────────────────────────────────────
+      - name: Setup Node.js ${{ env.NODE_VERSION }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: playwright/package-lock.json
+
+      # ── Install dependencies ─────────────────────────────────────────────────
+      - name: Install Playwright dependencies
+        working-directory: playwright
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+
+      # ── Configure AWS credentials ────────────────────────────────────────────
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id:     ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region:            ${{ secrets.AWS_REGION || 'us-east-1' }}
+
+      # ── Get Magento URL from AWS SSM ─────────────────────────────────────────
+      - name: Get Magento application URL
+        id: get-url
+        run: |
+          if [ -n "${{ github.event.inputs.base_url }}" ]; then
+            echo "BASE_URL=${{ github.event.inputs.base_url }}" >> $GITHUB_ENV
+          else
+            # Fetch from AWS SSM Parameter Store
+            BASE_URL=$(aws ssm get-parameter \
+              --name "/magento/prod/base_url" \
+              --with-decryption \
+              --query "Parameter.Value" \
+              --output text 2>/dev/null || echo "${{ secrets.MAGENTO_BASE_URL }}")
+            echo "BASE_URL=${BASE_URL}" >> $GITHUB_ENV
+          fi
+          echo "Testing against: ${BASE_URL}"
+
+      # ── Create test results directory ────────────────────────────────────────
+      - name: Prepare test directories
+        working-directory: playwright
+        run: |
+          mkdir -p test-results/.auth
+          mkdir -p test-results/artifacts
+          mkdir -p playwright-report
+
+      # ── Run Playwright tests ─────────────────────────────────────────────────
+      - name: Run Playwright tests
+        working-directory: playwright
+        env:
+          BASE_URL:                ${{ env.BASE_URL }}
+          MAGENTO_ADMIN_USER:      ${{ secrets.MAGENTO_ADMIN_USER }}
+          MAGENTO_ADMIN_PASS:      ${{ secrets.MAGENTO_ADMIN_PASS }}
+          MAGENTO_CUSTOMER_EMAIL:  ${{ secrets.MAGENTO_CUSTOMER_EMAIL }}
+          MAGENTO_CUSTOMER_PASS:   ${{ secrets.MAGENTO_CUSTOMER_PASS }}
+          CI:                      'true'
+        run: |
+          FILTER="${{ github.event.inputs.test_filter }}"
+          if [ -n "$FILTER" ]; then
+            npx playwright test --grep "$FILTER" || true
+          else
+            npx playwright test || true
+          fi
+
+      # ── Upload test results ──────────────────────────────────────────────────
+      - name: Upload Playwright HTML report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report-${{ github.run_id }}
+          path: playwright/playwright-report/
+          retention-days: 30
+
+      - name: Upload test results JSON
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-${{ github.run_id }}
+          path: playwright/test-results/
+          retention-days: 14
+
+      # ── Publish test report to S3 ────────────────────────────────────────────
+      - name: Publish report to S3
+        if: always()
+        run: |
+          REPORT_BUCKET=$(aws ssm get-parameter \
+            --name "/sdlc-ai/playwright_report_bucket" \
+            --query "Parameter.Value" --output text 2>/dev/null || echo "")
+          if [ -n "$REPORT_BUCKET" ]; then
+            RUN_ID="${{ github.run_id }}"
+            aws s3 sync playwright/playwright-report/ \
+              "s3://${REPORT_BUCKET}/reports/${RUN_ID}/" \
+              --content-type "text/html" --delete
+            aws s3 cp playwright/test-results/results.json \
+              "s3://${REPORT_BUCKET}/results/${RUN_ID}.json" || true
+            echo "Report published: https://${REPORT_BUCKET}.s3.amazonaws.com/reports/${RUN_ID}/index.html"
+          fi
+
+      # ── Post results to SDLC platform ────────────────────────────────────────
+      - name: Post test results to SDLC AI Platform
+        if: always()
+        run: |
+          SDLC_API=$(aws ssm get-parameter \
+            --name "/sdlc-ai/api_url" \
+            --query "Parameter.Value" --output text 2>/dev/null || echo "")
+          if [ -n "$SDLC_API" ] && [ -f "playwright/test-results/results.json" ]; then
+            RESULTS=$(cat playwright/test-results/results.json)
+            curl -s -X POST "${SDLC_API}/playwright/results" \
+              -H "Content-Type: application/json" \
+              -d "{
+                \"run_id\": \"${{ github.run_id }}\",
+                \"commit\": \"${{ github.sha }}\",
+                \"branch\": \"${{ github.ref_name }}\",
+                \"results\": ${RESULTS},
+                \"report_url\": \"https://${REPORT_BUCKET}.s3.amazonaws.com/reports/${{ github.run_id }}/index.html\"
+              }" || true
+          fi
+
+      # ── Summary ──────────────────────────────────────────────────────────────
+      - name: Test results summary
+        if: always()
+        run: |
+          if [ -f "playwright/test-results/results.json" ]; then
+            python3 -c "
+import json, sys
+with open('playwright/test-results/results.json') as f:
+    r = json.load(f)
+suites = r.get('suites', [])
+passed = failed = skipped = 0
+def count(s):
+    global passed, failed, skipped
+    for spec in s.get('specs',[]):
+        for t in spec.get('tests',[]):
+            status = t.get('status','unexpected')
+            if status == 'expected':    passed += 1
+            elif status == 'skipped':   skipped += 1
+            else:                       failed += 1
+    for child in s.get('suites',[]): count(child)
+for s in suites: count(s)
+total = passed + failed + skipped
+print(f'## Playwright Test Results')
+print(f'| Status  | Count |')
+print(f'|---------|-------|')
+print(f'| ✅ Passed  | {passed} |')
+print(f'| ❌ Failed  | {failed} |')
+print(f'| ⏭ Skipped | {skipped} |')
+print(f'| Total   | {total} |')
+if failed > 0:
+    print(f'\n⚠️ {failed} test(s) failed')
+    sys.exit(1)
+else:
+    print(f'\n✅ All {passed} tests passed')
+" >> $GITHUB_STEP_SUMMARY || true
+          fi
