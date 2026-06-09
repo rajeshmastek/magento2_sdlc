@@ -155,22 +155,7 @@ jobs:
           key: ${{ runner.os }}-buildx-${{ github.sha }}
           restore-keys: ${{ runner.os }}-buildx-
 
-      - name: Validate Magento source is present
-        run: |
-          if [ -f "composer.json" ]; then
-            echo "composer.json found"
-            if [ -d "vendor/magento" ]; then
-              echo "vendor/magento present — Docker build will skip composer install"
-            else
-              echo "vendor/magento not found — Docker will run composer install"
-              echo "Tip: copy vendor/ from server to avoid Marketplace auth in CI"
-            fi
-          else
-            echo "ERROR: No composer.json in repo root."
-            echo "Copy your Magento 2.4.9 source into the repo root first."
-            echo "See README for instructions."
-            exit 1
-          fi
+
 
       - name: Build and push to ECR
         id: build-push

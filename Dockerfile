@@ -1,16 +1,17 @@
 # ──────────────────────────────────────────────────────────────────────────────
 # Magento 2.4.9 Production Docker Image
-# Base: PHP 8.3 FPM + nginx + all required extensions
+# Installs Magento via Composer during build — no pre-copied source needed
 # ──────────────────────────────────────────────────────────────────────────────
 ARG MAGENTO_VERSION=2.4.9
 ARG MAGENTO_PUBLIC_KEY=""
 ARG MAGENTO_PRIVATE_KEY=""
+
 FROM php:8.3-fpm-bookworm AS base
 
 LABEL maintainer="SDLC AI Platform"
-LABEL org.opencontainers.image.description="Magento 2.4.9 with custom modules"
+LABEL org.opencontainers.image.description="Magento 2.4.9 production image"
 
-# ── System dependencies ──────────────────────────────────────────────────────
+# ── System dependencies ───────────────────────────────────────────────────────
 RUN apt-get update && apt-get install -y --no-install-recommends \
     nginx \
     supervisor \
@@ -18,26 +19,24 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libjpeg62-turbo-dev \
     libpng-dev \
     libwebp-dev \
-    libxpm-dev \
     libicu-dev \
     libxml2-dev \
     libxslt-dev \
     libzip-dev \
     libsodium-dev \
-    libssl-dev \
-    libcurl4-openssl-dev \
     libonig-dev \
-    libpq-dev \
+    libssl-dev \
     curl \
     git \
     unzip \
     cron \
-    gettext-base \
+    redis-tools \
+    default-mysql-client \
   && rm -rf /var/lib/apt/lists/*
 
-# ── PHP extensions ───────────────────────────────────────────────────────────
+# ── PHP extensions ────────────────────────────────────────────────────────────
 RUN docker-php-ext-configure gd \
-      --with-freetype --with-jpeg --with-webp --with-xpm \
+      --with-freetype --with-jpeg --with-webp \
   && docker-php-ext-install -j$(nproc) \
       bcmath \
       gd \
@@ -50,84 +49,66 @@ RUN docker-php-ext-configure gd \
       xsl \
       zip \
       sodium \
-  && pecl install redis xdebug-3.3.0 \
+  && pecl install redis \
   && docker-php-ext-enable redis \
   && rm -rf /tmp/pear
 
-# ── PHP configuration ────────────────────────────────────────────────────────
-COPY docker/php/php.ini    /usr/local/etc/php/conf.d/magento.ini
+# ── PHP configuration ─────────────────────────────────────────────────────────
+COPY docker/php/php.ini     /usr/local/etc/php/conf.d/magento.ini
 COPY docker/php/opcache.ini /usr/local/etc/php/conf.d/opcache.ini
 
-# ── nginx configuration ──────────────────────────────────────────────────────
-COPY docker/nginx/nginx.conf       /etc/nginx/nginx.conf
-COPY docker/nginx/magento.conf     /etc/nginx/conf.d/magento.conf
+# ── nginx configuration ───────────────────────────────────────────────────────
+COPY docker/nginx/nginx.conf   /etc/nginx/nginx.conf
+COPY docker/nginx/magento.conf /etc/nginx/conf.d/magento.conf
 
-# ── Composer ─────────────────────────────────────────────────────────────────
+# ── Composer 2 ───────────────────────────────────────────────────────────────
 COPY --from=composer:2.7 /usr/bin/composer /usr/bin/composer
 ENV COMPOSER_HOME=/var/cache/composer \
-    COMPOSER_ALLOW_SUPERUSER=1
+    COMPOSER_ALLOW_SUPERUSER=1 \
+    COMPOSER_NO_INTERACTION=1
 
-# ── Application user ─────────────────────────────────────────────────────────
+# ── Application user ──────────────────────────────────────────────────────────
 RUN useradd -r -u 1001 -g www-data -s /bin/bash -d /var/www/html magento \
   && mkdir -p /var/www/html \
   && chown -R magento:www-data /var/www/html
 
 WORKDIR /var/www/html
 
-# ── Download Magento 2.4.9 via Composer ──────────────────────────────────────
-# Requires MAGENTO_PUBLIC_KEY + MAGENTO_PRIVATE_KEY build args
-# OR pre-copy source into repo under magento_src/
-ARG MAGENTO_PUBLIC_KEY=""
-ARG MAGENTO_PRIVATE_KEY=""
+# ── Install Magento 2.4.9 from Marketplace ────────────────────────────────────
+ARG MAGENTO_PUBLIC_KEY
+ARG MAGENTO_PRIVATE_KEY
+ARG MAGENTO_VERSION=2.4.9
 
-RUN --mount=type=cache,target=/var/cache/composer \
-    if [ -n "$MAGENTO_PUBLIC_KEY" ]; then \
+RUN --mount=type=cache,target=/var/cache/composer,uid=1001 \
+    # Configure Marketplace auth if keys provided
+    if [ -n "${MAGENTO_PUBLIC_KEY}" ]; then \
       composer config --global http-basic.repo.magento.com \
-        "$MAGENTO_PUBLIC_KEY" "$MAGENTO_PRIVATE_KEY"; \
-    fi
-
-# If composer.json already exists (source copied into repo), just install deps.
-# Otherwise create the Magento project from scratch.
-COPY --chown=magento:www-data . /var/www/html/
-
-# Install or skip Composer dependencies
-# If vendor/magento already present (source copied from server), skip install
-# If composer.json present but no vendor, run install with marketplace keys
-# MAGENTO_PUBLIC_KEY / MAGENTO_PRIVATE_KEY build args are optional
-RUN --mount=type=cache,target=/var/cache/composer \
-    if [ -d "vendor/magento" ]; then \
-      echo "vendor/ already present — skipping composer install"; \
-    elif [ -f "composer.json" ]; then \
-      echo "Running composer install..." && \
-      if [ -n "$MAGENTO_PUBLIC_KEY" ]; then \
-        composer config --global http-basic.repo.magento.com \
-          "$MAGENTO_PUBLIC_KEY" "$MAGENTO_PRIVATE_KEY"; \
-      fi && \
-      composer install \
+        "${MAGENTO_PUBLIC_KEY}" "${MAGENTO_PRIVATE_KEY}"; \
+    fi \
+    # Create Magento project
+    && composer create-project \
+        --repository-url=https://repo.magento.com/ \
+        magento/project-community-edition="${MAGENTO_VERSION}" \
+        /var/www/html \
         --no-dev \
-        --optimize-autoloader \
         --no-interaction \
-        --no-progress && \
-      composer clear-cache; \
-    else \
-      echo "ERROR: No composer.json and no vendor/ directory found." && \
-      echo "Please either:" && \
-      echo "  1. Copy Magento source into repo root (recommended)" && \
-      echo "  2. Set MAGENTO_PUBLIC_KEY + MAGENTO_PRIVATE_KEY build args" && \
-      exit 1; \
-    fi
+        --no-progress \
+    && composer clear-cache
+
+# ── Copy custom modules (app/code/Vendor) ─────────────────────────────────────
+# Only copies if app/code/Vendor exists in build context
+COPY --chown=magento:www-data app/code/ /var/www/html/app/code/
 
 # ── Set permissions ───────────────────────────────────────────────────────────
-RUN find /var/www/html -type f -exec chmod 644 {} \; \
-  && find /var/www/html -type d -exec chmod 755 {} \; \
+RUN find /var/www/html -type d -exec chmod 755 {} \; \
+  && find /var/www/html -type f -exec chmod 644 {} \; \
   && chmod +x /var/www/html/bin/magento \
   && chown -R magento:www-data \
        /var/www/html/var \
        /var/www/html/pub \
        /var/www/html/generated \
        /var/www/html/app/etc \
-  && mkdir -p /var/log/supervisor /run/php \
-  && touch /run/php/php-fpm.sock
+  && mkdir -p /var/log/supervisor /run/php
 
 # ── Supervisor configuration ──────────────────────────────────────────────────
 COPY docker/supervisord.conf /etc/supervisor/conf.d/supervisord.conf
@@ -136,9 +117,9 @@ COPY docker/supervisord.conf /etc/supervisor/conf.d/supervisord.conf
 COPY docker/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
-EXPOSE 80 443
+EXPOSE 80
 
-HEALTHCHECK --interval=30s --timeout=10s --start-period=120s --retries=3 \
+HEALTHCHECK --interval=30s --timeout=10s --start-period=180s --retries=5 \
   CMD curl -f http://localhost/health || exit 1
 
 ENTRYPOINT ["/entrypoint.sh"]
