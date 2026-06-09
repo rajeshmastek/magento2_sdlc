@@ -236,44 +236,6 @@ jobs:
           wait-for-service-stability: true
           wait-for-minutes:           30
 
-      - name: Initialize database (first deploy only)
-        run: |
-          CLUSTER="${{ secrets.ECS_CLUSTER }}"
-          SERVICE="${{ secrets.ECS_SERVICE }}"
-          REGION="${{ secrets.AWS_REGION }}"
-
-          # Wait for a task to be running
-          echo "Waiting for ECS task to be running..."
-          for i in $(seq 1 20); do
-            TASK_ARN=$(aws ecs list-tasks               --cluster "$CLUSTER"               --service-name "$SERVICE"               --desired-status RUNNING               --region "$REGION"               --query "taskArns[0]" --output text 2>/dev/null)
-            if [ -n "$TASK_ARN" ] && [ "$TASK_ARN" != "None" ]; then
-              echo "Task running: $TASK_ARN"
-              break
-            fi
-            echo "  Attempt $i/20 - waiting for task..."
-            sleep 15
-          done
-
-          if [ -z "$TASK_ARN" ] || [ "$TASK_ARN" = "None" ]; then
-            echo "WARNING: No running task found - skipping DB init"
-          else
-            echo "Running DB initialization via ECS exec..."
-            aws ecs execute-command               --cluster "$CLUSTER"               --task "$TASK_ARN"               --container magento               --command "/bin/bash -c "php -r \"
-                try {
-                  \\\\$pdo = new PDO(
-                    'mysql:host=' . getenv('MAGENTO_DB_HOST'),
-                    getenv('MAGENTO_DB_USER'),
-                    getenv('MAGENTO_DB_PASS'),
-                    [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]
-                  );
-                  \\\\$db = getenv('MAGENTO_DB_NAME');
-                  \\\\$pdo->exec(\\\"CREATE DATABASE IF NOT EXISTS \\\\\\\\`\\\\$db\\\\\\\\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci\\\");
-                  \\\\$pdo->exec(\\\"GRANT ALL PRIVILEGES ON \\\\\\\\`\\\\$db\\\\\\\\`.* TO '\" . getenv('MAGENTO_DB_USER') . \"'@'%'\\\");
-                  echo 'DB OK';
-                } catch(Exception \\\\$e) { echo 'DB warning: ' . \\\\$e->getMessage(); }
-              \"""               --interactive               --region "$REGION" 2>/dev/null || echo "DB init skipped (ECS exec may not be enabled yet)"
-          fi
-
       - name: Wait for Magento setup:install to complete
         run: |
           URL="${{ secrets.MAGENTO_BASE_URL }}"
