@@ -90,9 +90,19 @@ RUN --mount=type=cache,target=/var/cache/composer \
 # Otherwise create the Magento project from scratch.
 COPY --chown=magento:www-data . /var/www/html/
 
+# Install or skip Composer dependencies
+# If vendor/magento already present (source copied from server), skip install
+# If composer.json present but no vendor, run install with marketplace keys
+# MAGENTO_PUBLIC_KEY / MAGENTO_PRIVATE_KEY build args are optional
 RUN --mount=type=cache,target=/var/cache/composer \
-    if [ -f "composer.json" ]; then \
-      echo "composer.json found — installing dependencies..." && \
+    if [ -d "vendor/magento" ]; then \
+      echo "vendor/ already present — skipping composer install"; \
+    elif [ -f "composer.json" ]; then \
+      echo "Running composer install..." && \
+      if [ -n "$MAGENTO_PUBLIC_KEY" ]; then \
+        composer config --global http-basic.repo.magento.com \
+          "$MAGENTO_PUBLIC_KEY" "$MAGENTO_PRIVATE_KEY"; \
+      fi && \
       composer install \
         --no-dev \
         --optimize-autoloader \
@@ -100,16 +110,11 @@ RUN --mount=type=cache,target=/var/cache/composer \
         --no-progress && \
       composer clear-cache; \
     else \
-      echo "No composer.json — creating Magento 2.4.9 project..." && \
-      composer create-project \
-        --repository-url=https://repo.magento.com/ \
-        magento/project-community-edition=2.4.9 \
-        /tmp/magento-src \
-        --no-dev \
-        --no-interaction && \
-      cp -r /tmp/magento-src/. /var/www/html/ && \
-      rm -rf /tmp/magento-src && \
-      composer clear-cache; \
+      echo "ERROR: No composer.json and no vendor/ directory found." && \
+      echo "Please either:" && \
+      echo "  1. Copy Magento source into repo root (recommended)" && \
+      echo "  2. Set MAGENTO_PUBLIC_KEY + MAGENTO_PRIVATE_KEY build args" && \
+      exit 1; \
     fi
 
 # ── Set permissions ───────────────────────────────────────────────────────────
