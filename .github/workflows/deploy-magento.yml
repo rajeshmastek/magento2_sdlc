@@ -225,14 +225,14 @@ jobs:
         uses: aws-actions/amazon-ecs-deploy-task-definition@v2
         with:
           task-definition:            ${{ steps.task-def.outputs.task-definition }}
-          service:                    ${{ needs.resolve-infra.outputs.service }}
-          cluster:                    ${{ needs.resolve-infra.outputs.cluster }}
+          service:                    ${{ secrets.ECS_SERVICE }}
+          cluster:                    ${{ secrets.ECS_CLUSTER }}
           wait-for-service-stability: true
           wait-for-minutes:           30
 
       - name: Wait for Magento setup:install to complete
         run: |
-          URL="${{ needs.resolve-infra.outputs.magento_url }}"
+          URL="${{ secrets.MAGENTO_BASE_URL }}"
           echo "Polling ${URL}/health — setup:install runs on first boot (~5-10 min)..."
           for i in $(seq 1 40); do
             STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
