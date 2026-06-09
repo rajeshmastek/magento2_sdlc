@@ -17,7 +17,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # ── PHP extensions ────────────────────────────────────────────────────────────
 RUN docker-php-ext-configure gd --with-freetype --with-jpeg --with-webp \
   && docker-php-ext-install -j$(nproc) \
-      bcmath gd intl mbstring opcache pdo_mysql soap sockets xsl zip sodium \
+      bcmath ctype curl dom ftp gd hash iconv intl mbstring \
+      opcache pdo pdo_mysql simplexml soap sockets xsl zip sodium \
   && pecl install redis && docker-php-ext-enable redis \
   && rm -rf /tmp/pear
 
