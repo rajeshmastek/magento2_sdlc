@@ -175,7 +175,7 @@ jobs:
     needs: [resolve-infra, build]
     environment:
       name: ${{ github.event.inputs.environment || 'staging' }}
-      url:  ${{ secrets.MAGENTO_BASE_URL }}
+      url:  ${{ needs.resolve-infra.outputs.magento_url }}
 
     steps:
       - name: Checkout
