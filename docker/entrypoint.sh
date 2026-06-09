@@ -6,61 +6,22 @@ LOCK_FILE="${MAGENTO_ROOT}/.setup_complete"
 
 log() { echo "[entrypoint] $*"; }
 
-# ── Wait for MySQL ─────────────────────────────────────────────────────────────
+# ------ Wait for MySQL ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 wait_for_db() {
-  log "Waiting for MySQL at ${MAGENTO_DB_HOST}:${MAGENTO_DB_PORT:-3306}..."
+  log "Waiting for MySQL at ${MAGENTO_DB_HOST}..."
   for i in $(seq 1 60); do
-    if php -r "
-      try {
-        new PDO('mysql:host=${MAGENTO_DB_HOST};port=${MAGENTO_DB_PORT:-3306}',
-          '${MAGENTO_DB_USER}', '${MAGENTO_DB_PASS}');
-        echo 'ok';
-      } catch(Exception \$e) { exit(1); }
-    " 2>/dev/null | grep -q ok; then
+    if php -r "new PDO('mysql:host=${MAGENTO_DB_HOST}','${MAGENTO_DB_USER}','${MAGENTO_DB_PASS}'); echo 'ok';" 2>/dev/null | grep -q ok; then
       log "MySQL ready"
       return 0
     fi
     log "  Attempt ${i}/60 - retrying in 3s..."
     sleep 3
   done
-  log "ERROR: MySQL not available after 3 minutes - aborting"
+  log "ERROR: MySQL not available after 3 minutes"
   exit 1
 }
 
-# Ensure database exists and user has all required privileges
-setup_database() {
-  log "Creating database ${MAGENTO_DB_NAME} if not exists..."
-
-  # Connect as the same user - on RDS the user owns its own DB
-  # This also handles the case where DB was pre-created by Terraform
-  php -r "
-    \$host = getenv("MAGENTO_DB_HOST");
-    \$user = getenv("MAGENTO_DB_USER");
-    \$pass = getenv("MAGENTO_DB_PASS");
-    \$db   = getenv("MAGENTO_DB_NAME");
-    try {
-      \$pdo = new PDO("mysql:host=\$host", \$user, \$pass,
-        [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
-      \$pdo->exec("CREATE DATABASE IF NOT EXISTS \`\$db\`
-        CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci");
-      \$pdo->exec("GRANT SELECT,INSERT,UPDATE,DELETE,CREATE,DROP,INDEX,
-        ALTER,CREATE TEMPORARY TABLES,LOCK TABLES,EXECUTE,
-        CREATE VIEW,SHOW VIEW,CREATE ROUTINE,ALTER ROUTINE,TRIGGER
-        ON \`\$db\`.* TO \"\`\$user\`\"@\"%\"  ");
-      \$pdo->exec("FLUSH PRIVILEGES");
-      echo "DB ready\n";
-    } catch(Exception \$e) {
-      // DB may already exist and user may already have grants - continue
-      echo "DB init note: " . \$e->getMessage() . "\n";
-    }
-  " 2>&1 || true
-  log "Database setup complete"
-}
-  " 2>/dev/null
-  log "Database check complete"
-}
-
-# ── Wait for Redis ─────────────────────────────────────────────────────────────
+# ------ Wait for Redis ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 wait_for_redis() {
   if [ -z "${MAGENTO_REDIS_HOST}" ]; then return 0; fi
   log "Waiting for Redis at ${MAGENTO_REDIS_HOST}..."
@@ -71,26 +32,68 @@ wait_for_redis() {
     fi
     sleep 2
   done
-  log "WARNING: Redis not available — continuing without Redis cache"
+  log "WARNING: Redis not available - continuing without Redis"
 }
 
-# ── Create health endpoint ──────────────────────────────────────────────────────
-setup_health() {
-  echo '<?php http_response_code(200); echo "OK";' > "${MAGENTO_ROOT}/pub/health.php"
+# ------ Create database if not exists ------------------------------------------------------------------------------------------------------------------------------------------
+setup_database() {
+  log "Creating database ${MAGENTO_DB_NAME} if not exists..."
+  php << 'PHPEOF'
+<?php
+$host = getenv('MAGENTO_DB_HOST');
+$user = getenv('MAGENTO_DB_USER');
+$pass = getenv('MAGENTO_DB_PASS');
+$db   = getenv('MAGENTO_DB_NAME');
+try {
+    $pdo = new PDO("mysql:host=$host", $user, $pass,
+        [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
+    $pdo->exec("CREATE DATABASE IF NOT EXISTS `$db`
+        CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci");
+    $pdo->exec("GRANT SELECT,INSERT,UPDATE,DELETE,CREATE,DROP,INDEX,ALTER,
+        CREATE TEMPORARY TABLES,LOCK TABLES,EXECUTE,
+        CREATE VIEW,SHOW VIEW,CREATE ROUTINE,ALTER ROUTINE,TRIGGER
+        ON `$db`.* TO '$user'@'%'");
+    $pdo->exec("FLUSH PRIVILEGES");
+    echo "Database $db ready\n";
+} catch (Exception $e) {
+    echo "DB note: " . $e->getMessage() . "\n";
+}
+PHPEOF
+  log "Database setup done"
 }
 
-# ── Run Magento setup:install ──────────────────────────────────────────────────
+# ------ Configure Redis ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+configure_redis() {
+  if [ -z "${MAGENTO_REDIS_HOST}" ]; then
+    log "No Redis host set - skipping Redis config"
+    return 0
+  fi
+  if ! redis-cli -h "${MAGENTO_REDIS_HOST}" ping 2>/dev/null | grep -q PONG; then
+    log "WARNING: Cannot reach Redis - skipping Redis config"
+    return 0
+  fi
+  log "Configuring Redis at ${MAGENTO_REDIS_HOST}..."
+  php "${MAGENTO_ROOT}/bin/magento" setup:config:set \
+    --cache-backend=redis \
+    --cache-backend-redis-server="${MAGENTO_REDIS_HOST}" \
+    --cache-backend-redis-db=0 \
+    --page-cache=redis \
+    --page-cache-redis-server="${MAGENTO_REDIS_HOST}" \
+    --page-cache-redis-db=1 \
+    --session-save=redis \
+    --session-save-redis-host="${MAGENTO_REDIS_HOST}" \
+    --session-save-redis-db=2 \
+    --no-interaction 2>/dev/null || log "WARNING: Redis config failed"
+}
+
+# ------ Run setup:install ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 run_setup_install() {
   log "Running Magento setup:install..."
 
-  # Determine search engine and flags
+  # Set search engine flags
   if [ -n "${MAGENTO_ES_HOST}" ]; then
-    SEARCH_FLAGS="--search-engine=opensearch \
-      --opensearch-host=${MAGENTO_ES_HOST} \
-      --opensearch-port=${MAGENTO_ES_PORT:-9200} \
-      --opensearch-index-prefix=magento2"
+    SEARCH_FLAGS="--search-engine=opensearch --opensearch-host=${MAGENTO_ES_HOST} --opensearch-port=${MAGENTO_ES_PORT:-9200} --opensearch-index-prefix=magento2"
   else
-    # Fallback: use MySQL fulltext search (no external search needed)
     SEARCH_FLAGS="--search-engine=mysql"
   fi
 
@@ -120,102 +123,76 @@ run_setup_install() {
   log "setup:install complete"
 }
 
-
-# Configure Redis only if host is set AND reachable
-configure_redis() {
-  if [ -z "${MAGENTO_REDIS_HOST}" ]; then
-    log "MAGENTO_REDIS_HOST not set - skipping Redis, using file cache"
-    return 0
-  fi
-  if ! redis-cli -h "${MAGENTO_REDIS_HOST}" -p 6379 ping 2>/dev/null | grep -q PONG; then
-    log "WARNING: Cannot reach Redis at ${MAGENTO_REDIS_HOST} - skipping Redis config"
-    return 0
-  fi
-  log "Configuring Redis at ${MAGENTO_REDIS_HOST}..."
-  php "${MAGENTO_ROOT}/bin/magento" setup:config:set \
-    --cache-backend=redis \
-    --cache-backend-redis-server="${MAGENTO_REDIS_HOST}" \
-    --cache-backend-redis-db=0 \
-    --page-cache=redis \
-    --page-cache-redis-server="${MAGENTO_REDIS_HOST}" \
-    --page-cache-redis-db=1 \
-    --session-save=redis \
-    --session-save-redis-host="${MAGENTO_REDIS_HOST}" \
-    --session-save-redis-db=2 \
-    --no-interaction 2>/dev/null || log "WARNING: Redis config failed - using db sessions"
-}
-
-# ── Enable custom modules ──────────────────────────────────────────────────────
+# ------ Enable modules ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 enable_modules() {
   log "Enabling all modules..."
   php "${MAGENTO_ROOT}/bin/magento" module:enable --all --no-interaction 2>/dev/null || true
 }
 
-# ── Run setup:upgrade ──────────────────────────────────────────────────────────
+# ------ Setup upgrade ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 run_upgrade() {
   log "Running setup:upgrade..."
   php "${MAGENTO_ROOT}/bin/magento" setup:upgrade --no-interaction
 }
 
-# ── Compile DI ─────────────────────────────────────────────────────────────────
+# ------ DI compile ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 run_compile() {
   log "Running setup:di:compile..."
   php "${MAGENTO_ROOT}/bin/magento" setup:di:compile --no-interaction
 }
 
-# ── Deploy static content ──────────────────────────────────────────────────────
+# ------ Static content ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 deploy_static() {
   log "Deploying static content..."
   php "${MAGENTO_ROOT}/bin/magento" setup:static-content:deploy \
-    en_US -f --no-interaction --jobs=2 2>/dev/null || \
-  php "${MAGENTO_ROOT}/bin/magento" setup:static-content:deploy \
-    en_US -f --no-interaction || true
+    en_US -f --no-interaction --jobs=2 || true
 }
 
-# ── Set production mode + flush ────────────────────────────────────────────────
+# ------ Finalize ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 finalize() {
-  log "Setting production mode..."
+  log "Setting production mode and flushing cache..."
   php "${MAGENTO_ROOT}/bin/magento" deploy:mode:set production --no-interaction 2>/dev/null || true
   php "${MAGENTO_ROOT}/bin/magento" cache:flush --no-interaction
   log "Cache flushed"
 }
 
-# ── Sample data (optional) ─────────────────────────────────────────────────────
+# ------ Sample data ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 install_sample_data() {
   if [ "${INSTALL_SAMPLE_DATA:-false}" != "true" ]; then return 0; fi
   log "Installing sample data..."
-  php "${MAGENTO_ROOT}/bin/magento" sampledata:deploy --no-interaction 2>/dev/null || \
-    log "WARNING: sample data deploy failed — continuing"
+  php "${MAGENTO_ROOT}/bin/magento" sampledata:deploy --no-interaction 2>/dev/null || true
 }
 
-# ── Cron setup ─────────────────────────────────────────────────────────────────
+# ------ Cron ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 setup_cron() {
-  log "Setting up Magento cron..."
+  log "Setting up cron..."
   php "${MAGENTO_ROOT}/bin/magento" cron:install --force 2>/dev/null || true
 }
 
-# ── Main ───────────────────────────────────────────────────────────────────────
-log "=== Magento 2.4.9 Container Starting ==="
-log "Base URL:  ${MAGENTO_BASE_URL:-http://localhost/}"
-log "Database:  ${MAGENTO_DB_HOST}/${MAGENTO_DB_NAME}"
-log "ES Host:   ${MAGENTO_ES_HOST:-localhost}"
+# ------ Health endpoint ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+setup_health() {
+  echo '<?php http_response_code(200); echo "OK";' > "${MAGENTO_ROOT}/pub/health.php"
+}
 
-# Create health file immediately so ALB health checks pass during setup
+# ------ Main ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+log "=== Magento 2.4.9 Starting ==="
+log "URL:  ${MAGENTO_BASE_URL:-http://localhost/}"
+log "DB:   ${MAGENTO_DB_HOST}/${MAGENTO_DB_NAME}"
+log "ES:   ${MAGENTO_ES_HOST:-none}"
+
 setup_health
-
 wait_for_db
 wait_for_redis
 
 if [ -f "${LOCK_FILE}" ]; then
-  # ── Already installed — just upgrade ────────────────────────────────────────
-  log "Existing installation detected — running upgrade..."
+  log "Existing install detected - running upgrade..."
   enable_modules
   run_upgrade
   run_compile
   finalize
 else
-  # ── First run — full install ─────────────────────────────────────────────────
-  log "First run — running full setup:install..."
+  log "First run - full install..."
+  setup_database
   run_setup_install
   configure_redis
   enable_modules
@@ -226,7 +203,7 @@ else
   finalize
   setup_cron
   touch "${LOCK_FILE}"
-  log "=== Installation complete ==="
+  log "=== Install complete ==="
 fi
 
 log "=== Starting services ==="
