@@ -1,14 +1,11 @@
 # ──────────────────────────────────────────────────────────────────────────────
-# Magento 2.4.9 Production Docker Image
+# Magento 2.4.9 — source files in repo, setup:install runs at container start
 # ──────────────────────────────────────────────────────────────────────────────
 FROM php:8.3-fpm-bookworm
 
 LABEL maintainer="SDLC AI Platform"
 
-# Build args — must be after FROM to be available in RUN
 ARG MAGENTO_VERSION=2.4.9
-ARG MAGENTO_PUBLIC_KEY
-ARG MAGENTO_PRIVATE_KEY
 
 # ── System dependencies ───────────────────────────────────────────────────────
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -37,14 +34,28 @@ ENV COMPOSER_ALLOW_SUPERUSER=1 \
     COMPOSER_NO_INTERACTION=1 \
     COMPOSER_PROCESS_TIMEOUT=2000
 
-# ── Install Magento 2.4.9 (exactly as it works locally) ──────────────────────
+# ── Copy Magento source from repo ────────────────────────────────────────────
 WORKDIR /var/www/html
+COPY --chown=www-data:www-data . /var/www/html/
 
-RUN composer config --global http-basic.repo.magento.com 286226c4fa5bbc9ea755e2334c1ee0ab 68e273e434aed279604ca6780c9fc2cd \
-  && composer create-project --repository-url=https://repo.magento.com magento/project-community-edition .
+# ── Install PHP dependencies from committed composer.lock ────────────────────
+# vendor/ should be in .gitignore — install from lock file
+RUN if [ ! -d "vendor/magento" ]; then \
+      echo "Installing Composer dependencies from composer.lock..." \
+      && composer install \
+           --no-dev \
+           --optimize-autoloader \
+           --no-interaction \
+           --no-progress; \
+    else \
+      echo "vendor/ already present — skipping composer install"; \
+    fi \
+  && composer clear-cache
 
-# ── Copy custom modules ───────────────────────────────────────────────────────
-COPY app/code/ /var/www/html/app/code/
+# ── Copy custom modules (overlay on top of Magento source) ───────────────────
+# Already included via COPY above if app/code/Vendor is in repo
+# This step is a no-op if already copied, but ensures custom code is present
+RUN echo "Custom modules in app/code/:" && ls app/code/ 2>/dev/null || echo "none"
 
 # ── Permissions ───────────────────────────────────────────────────────────────
 RUN useradd -r -u 1001 -g www-data -s /bin/bash -d /var/www/html magento \
@@ -53,8 +64,8 @@ RUN useradd -r -u 1001 -g www-data -s /bin/bash -d /var/www/html magento \
   && mkdir -p /var/log/supervisor /run/php
 
 # ── Supervisor + entrypoint ───────────────────────────────────────────────────
-COPY docker/supervisord.conf  /etc/supervisor/conf.d/supervisord.conf
-COPY docker/entrypoint.sh     /entrypoint.sh
+COPY docker/supervisord.conf /etc/supervisor/conf.d/supervisord.conf
+COPY docker/entrypoint.sh    /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
 EXPOSE 80

@@ -8,36 +8,35 @@ on:
       - 'composer.json'
       - 'composer.lock'
       - 'Dockerfile'
+      - 'docker/**'
       - '.github/workflows/deploy-magento.yml'
   workflow_dispatch:
     inputs:
       environment:
-        description: 'Deploy target environment'
+        description: 'Target environment'
         type: choice
         options: [staging, production]
         default: staging
       skip_tests:
-        description: 'Skip Playwright smoke tests after deploy'
+        description: 'Skip smoke tests'
         type: boolean
         default: false
 
 env:
-  AWS_REGION:     ${{ secrets.AWS_REGION }}
   ECR_REPOSITORY: magento24-app
   CONTAINER_NAME: magento
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
-  # ── 1. Resolve real names from AWS ───────────────────────────────────────
+  # ── 1. Resolve infrastructure names ──────────────────────────────────────
   resolve-infra:
-    name: Resolve Infrastructure Names
+    name: Resolve Infrastructure
     runs-on: ubuntu-latest
     outputs:
       cluster:      ${{ steps.infra.outputs.cluster }}
       service:      ${{ steps.infra.outputs.service }}
       task_family:  ${{ steps.infra.outputs.task_family }}
       magento_url:  ${{ steps.infra.outputs.magento_url }}
-      ecr_registry: ${{ steps.infra.outputs.ecr_registry }}
 
     steps:
       - name: Configure AWS credentials
@@ -48,72 +47,59 @@ jobs:
           aws-session-token:     ${{ secrets.AWS_SESSION_TOKEN }}
           aws-region:            ${{ secrets.AWS_REGION }}
 
-      - name: Resolve infra from AWS
+      - name: Resolve from AWS
         id: infra
         run: |
-          REGION="${{ secrets.AWS_REGION }}"
-          ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
-          echo "ecr_registry=${ACCOUNT_ID}.dkr.ecr.${REGION}.amazonaws.com" >> $GITHUB_OUTPUT
-
-          # Magento URL from SSM
+          # Magento URL
           MAGENTO_URL=$(aws ssm get-parameter \
-            --name "/magento/prod/base_url" \
-            --with-decryption \
-            --query "Parameter.Value" \
-            --output text 2>/dev/null || echo "${{ secrets.MAGENTO_BASE_URL }}")
+            --name "/magento/prod/base_url" --with-decryption \
+            --query "Parameter.Value" --output text 2>/dev/null \
+            || echo "${{ secrets.MAGENTO_BASE_URL }}")
           echo "magento_url=${MAGENTO_URL}" >> $GITHUB_OUTPUT
           echo "URL: ${MAGENTO_URL}"
 
-          # Find ECS cluster containing 'magento'
+          # ECS cluster
           CLUSTER_ARN=$(aws ecs list-clusters \
             --query "clusterArns[?contains(@,'magento')]|[0]" \
-            --output text 2>/dev/null || echo "None")
-          if [ "$CLUSTER_ARN" = "None" ] || [ -z "$CLUSTER_ARN" ]; then
+            --output text 2>/dev/null)
+          if [ -z "$CLUSTER_ARN" ] || [ "$CLUSTER_ARN" = "None" ]; then
             CLUSTER="${{ secrets.ECS_CLUSTER }}"
           else
-            CLUSTER=$(aws ecs describe-clusters \
-              --clusters "$CLUSTER_ARN" \
-              --query "clusters[0].clusterName" \
-              --output text)
+            CLUSTER=$(aws ecs describe-clusters --clusters "$CLUSTER_ARN" \
+              --query "clusters[0].clusterName" --output text)
           fi
           echo "cluster=${CLUSTER}" >> $GITHUB_OUTPUT
           echo "Cluster: ${CLUSTER}"
 
-          # Find ECS service in cluster
-          SERVICE_ARN=$(aws ecs list-services \
-            --cluster "$CLUSTER" \
+          # ECS service
+          SERVICE_ARN=$(aws ecs list-services --cluster "$CLUSTER" \
             --query "serviceArns[?contains(@,'magento')]|[0]" \
-            --output text 2>/dev/null || echo "None")
-          if [ "$SERVICE_ARN" = "None" ] || [ -z "$SERVICE_ARN" ]; then
+            --output text 2>/dev/null)
+          if [ -z "$SERVICE_ARN" ] || [ "$SERVICE_ARN" = "None" ]; then
             SERVICE="${{ secrets.ECS_SERVICE }}"
           else
-            SERVICE=$(aws ecs describe-services \
-              --cluster "$CLUSTER" \
+            SERVICE=$(aws ecs describe-services --cluster "$CLUSTER" \
               --services "$SERVICE_ARN" \
-              --query "services[0].serviceName" \
-              --output text)
+              --query "services[0].serviceName" --output text)
           fi
           echo "service=${SERVICE}" >> $GITHUB_OUTPUT
           echo "Service: ${SERVICE}"
 
-          # Find task definition family
-          TASK_DEF=$(aws ecs list-task-definitions \
-            --family-prefix "magento" \
-            --sort DESC \
-            --max-items 1 \
-            --query "taskDefinitionArns[0]" \
-            --output text 2>/dev/null || echo "None")
-          if [ "$TASK_DEF" = "None" ] || [ -z "$TASK_DEF" ]; then
+          # Task definition family
+          TASK_ARN=$(aws ecs list-task-definitions \
+            --family-prefix "magento" --sort DESC --max-items 1 \
+            --query "taskDefinitionArns[0]" --output text 2>/dev/null)
+          if [ -z "$TASK_ARN" ] || [ "$TASK_ARN" = "None" ]; then
             FAMILY="${{ secrets.ECS_TASK_FAMILY }}"
           else
-            FAMILY=$(echo "$TASK_DEF" | sed 's|.*/\(.*\):.*|\1|')
+            FAMILY=$(echo "$TASK_ARN" | sed 's|.*/\(.*\):.*|\1|')
           fi
           echo "task_family=${FAMILY}" >> $GITHUB_OUTPUT
           echo "Task family: ${FAMILY}"
 
-  # ── 2. Build and push Docker image ───────────────────────────────────────
+  # ── 2. Build and push image ───────────────────────────────────────────────
   build:
-    name: Build and Push Docker Image
+    name: Build Docker Image
     runs-on: ubuntu-latest
     needs: resolve-infra
     outputs:
@@ -123,15 +109,13 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
-      - name: Set version tag
+      - name: Set version
         id: version
         run: |
           VERSION="${{ github.ref_name }}-$(git rev-parse --short HEAD)-$(date +%Y%m%d%H%M%S)"
           echo "version=${VERSION}" >> $GITHUB_OUTPUT
-          echo "Building: ${VERSION}"
+          echo "Version: ${VERSION}"
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
@@ -141,7 +125,7 @@ jobs:
           aws-session-token:     ${{ secrets.AWS_SESSION_TOKEN }}
           aws-region:            ${{ secrets.AWS_REGION }}
 
-      - name: Login to Amazon ECR
+      - name: Login to ECR
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@v2
 
@@ -155,9 +139,7 @@ jobs:
           key: ${{ runner.os }}-buildx-${{ github.sha }}
           restore-keys: ${{ runner.os }}-buildx-
 
-
-
-      - name: Build and push to ECR
+      - name: Build and push
         id: build-push
         uses: docker/build-push-action@v5
         with:
@@ -171,10 +153,6 @@ jobs:
             ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:latest
           build-args: |
             MAGENTO_VERSION=2.4.9
-            MAGENTO_PUBLIC_KEY=${{ secrets.MAGENTO_PUBLIC_KEY }}
-            MAGENTO_PRIVATE_KEY=${{ secrets.MAGENTO_PRIVATE_KEY }}
-            BUILD_DATE=${{ github.event.head_commit.timestamp }}
-            VCS_REF=${{ github.sha }}
           cache-from: type=local,src=/tmp/.buildx-cache
           cache-to:   type=local,dest=/tmp/.buildx-cache-new,mode=max
 
@@ -190,9 +168,9 @@ jobs:
           echo "image=${IMAGE}" >> $GITHUB_OUTPUT
           echo "Image: ${IMAGE}"
 
-  # ── 3. Deploy to ECS ─────────────────────────────────────────────────────
+  # ── 3. Update ECS task definition with all Magento env vars ──────────────
   deploy:
-    name: Deploy to AWS ECS
+    name: Deploy to ECS
     runs-on: ubuntu-latest
     needs: [resolve-infra, build]
     environment:
@@ -211,64 +189,69 @@ jobs:
           aws-session-token:     ${{ secrets.AWS_SESSION_TOKEN }}
           aws-region:            ${{ secrets.AWS_REGION }}
 
-      - name: Login to Amazon ECR
+      - name: Login to ECR
         uses: aws-actions/amazon-ecr-login@v2
 
-      - name: Fetch current task definition
+      - name: Fetch task definition
         run: |
           aws ecs describe-task-definition \
             --task-definition "${{ needs.resolve-infra.outputs.task_family }}" \
-            --query taskDefinition \
-            > task-definition.json
-          echo "Task def: $(python3 -c "import json,sys; d=json.load(sys.stdin); print(d['family']+':'+str(d['revision']))" < task-definition.json)"
+            --query taskDefinition > task-definition.json
+          echo "Task def: $(python3 -c "import json,sys; d=json.load(open('task-definition.json')); print(d['family']+':'+str(d['revision']))")"
 
-      - name: Inject new image into task definition
+      - name: Inject new image
         id: task-def
         uses: aws-actions/amazon-ecs-render-task-definition@v1
         with:
           task-definition: task-definition.json
           container-name:  ${{ env.CONTAINER_NAME }}
           image:           ${{ needs.build.outputs.image }}
+          environment-variables: |
+            MAGENTO_BASE_URL=${{ needs.resolve-infra.outputs.magento_url }}/
+            MAGENTO_DB_HOST=${{ secrets.MAGENTO_DB_HOST }}
+            MAGENTO_DB_NAME=${{ secrets.MAGENTO_DB_NAME }}
+            MAGENTO_DB_USER=${{ secrets.MAGENTO_DB_USER }}
+            MAGENTO_DB_PASS=${{ secrets.MAGENTO_DB_PASS }}
+            MAGENTO_ADMIN_USER=${{ secrets.MAGENTO_ADMIN_USER }}
+            MAGENTO_ADMIN_PASS=${{ secrets.MAGENTO_ADMIN_PASS }}
+            MAGENTO_ADMIN_EMAIL=${{ secrets.MAGENTO_ADMIN_EMAIL }}
+            MAGENTO_REDIS_HOST=${{ secrets.MAGENTO_REDIS_HOST }}
+            MAGENTO_ES_HOST=${{ secrets.MAGENTO_ES_HOST }}
+            MAGENTO_ES_PORT=9200
+            INSTALL_SAMPLE_DATA=${{ secrets.INSTALL_SAMPLE_DATA || 'false' }}
+            MAGENTO_SESSION_SAVE=${{ secrets.MAGENTO_SESSION_SAVE || 'db' }}
 
-      - name: Deploy to ECS service
+      - name: Deploy to ECS
         uses: aws-actions/amazon-ecs-deploy-task-definition@v2
         with:
           task-definition:            ${{ steps.task-def.outputs.task-definition }}
           service:                    ${{ needs.resolve-infra.outputs.service }}
           cluster:                    ${{ needs.resolve-infra.outputs.cluster }}
           wait-for-service-stability: true
-          wait-for-minutes:           20
+          wait-for-minutes:           30
 
-      - name: Wait for Magento container initialisation
-        run: |
-          echo "Waiting 90s for setup:upgrade / di:compile in container..."
-          sleep 90
-
-      - name: Health check
+      - name: Wait for Magento setup:install to complete
         run: |
           URL="${{ needs.resolve-infra.outputs.magento_url }}"
-          echo "Polling ${URL}/health ..."
-          for i in $(seq 1 20); do
+          echo "Polling ${URL}/health — setup:install runs on first boot (~5-10 min)..."
+          for i in $(seq 1 40); do
             STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
               --connect-timeout 5 --max-time 15 "${URL}/health" 2>/dev/null || echo "000")
-            echo "  [${i}/20] HTTP ${STATUS}"
-            if [ "$STATUS" = "200" ] || [ "$STATUS" = "302" ] || [ "$STATUS" = "301" ]; then
+            echo "  [${i}/40] HTTP ${STATUS} ($(date +%H:%M:%S))"
+            if [ "$STATUS" = "200" ]; then
               echo "Magento is live at ${URL}"
               exit 0
             fi
             sleep 30
           done
-          echo "::warning::Health check did not pass — check ECS logs"
+          echo "::warning::Health check timed out — check ECS logs"
 
       - name: Store version in SSM
+        if: always()
         run: |
           aws ssm put-parameter \
             --name "/magento/prod/deployed_version" \
             --value "${{ needs.build.outputs.version }}" \
-            --type String --overwrite || true
-          aws ssm put-parameter \
-            --name "/sdlc-ai/last_magento_deploy" \
-            --value "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
             --type String --overwrite || true
 
       - name: Deployment summary
@@ -278,7 +261,6 @@ jobs:
           | | |
           |---|---|
           | Version | ${{ needs.build.outputs.version }} |
-          | Image | ${{ needs.build.outputs.image }} |
           | URL | ${{ needs.resolve-infra.outputs.magento_url }} |
           | Cluster | ${{ needs.resolve-infra.outputs.cluster }} |
           | Service | ${{ needs.resolve-infra.outputs.service }} |
@@ -296,7 +278,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Node.js 20
+      - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '20'
@@ -328,22 +310,10 @@ jobs:
           CI: 'true'
         run: npx playwright test --grep "@smoke" || true
 
-      - name: Upload report artifact
+      - name: Upload report
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: smoke-report-${{ github.run_id }}
           path: playwright/playwright-report/
           retention-days: 14
-
-      - name: Publish report to S3
-        if: always()
-        run: |
-          BUCKET=$(aws ssm get-parameter \
-            --name "/sdlc-ai/playwright_report_bucket" \
-            --query "Parameter.Value" --output text 2>/dev/null || echo "")
-          if [ -n "$BUCKET" ] && [ "$BUCKET" != "None" ]; then
-            aws s3 sync playwright/playwright-report/ \
-              "s3://${BUCKET}/smoke/${{ github.run_id }}/" --delete || true
-            echo "Report: http://${BUCKET}.s3-website-${{ secrets.AWS_REGION }}.amazonaws.com/smoke/${{ github.run_id }}/index.html"
-          fi
