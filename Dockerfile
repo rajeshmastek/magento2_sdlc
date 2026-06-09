@@ -40,7 +40,7 @@ ENV COMPOSER_ALLOW_SUPERUSER=1 \
 # ── Install Magento 2.4.9 (exactly as it works locally) ──────────────────────
 WORKDIR /var/www/html
 
-RUN composer config --global http-basic.repo.magento.com "${MAGENTO_PUBLIC_KEY}" "${MAGENTO_PRIVATE_KEY}" \
+RUN composer config --global http-basic.repo.magento.com 286226c4fa5bbc9ea755e2334c1ee0ab 68e273e434aed279604ca6780c9fc2cd \
   && composer create-project --repository-url=https://repo.magento.com magento/project-community-edition .
 
 # ── Copy custom modules ───────────────────────────────────────────────────────
