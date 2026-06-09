@@ -3,6 +3,8 @@
 # Base: PHP 8.3 FPM + nginx + all required extensions
 # ──────────────────────────────────────────────────────────────────────────────
 ARG MAGENTO_VERSION=2.4.9
+ARG MAGENTO_PUBLIC_KEY=""
+ARG MAGENTO_PRIVATE_KEY=""
 FROM php:8.3-fpm-bookworm AS base
 
 LABEL maintainer="SDLC AI Platform"
@@ -72,18 +74,43 @@ RUN useradd -r -u 1001 -g www-data -s /bin/bash -d /var/www/html magento \
 
 WORKDIR /var/www/html
 
-# ── Magento files ─────────────────────────────────────────────────────────────
-# Copy Magento source (must be in repo root or fetched via Composer)
+# ── Download Magento 2.4.9 via Composer ──────────────────────────────────────
+# Requires MAGENTO_PUBLIC_KEY + MAGENTO_PRIVATE_KEY build args
+# OR pre-copy source into repo under magento_src/
+ARG MAGENTO_PUBLIC_KEY=""
+ARG MAGENTO_PRIVATE_KEY=""
+
+RUN --mount=type=cache,target=/var/cache/composer \
+    if [ -n "$MAGENTO_PUBLIC_KEY" ]; then \
+      composer config --global http-basic.repo.magento.com \
+        "$MAGENTO_PUBLIC_KEY" "$MAGENTO_PRIVATE_KEY"; \
+    fi
+
+# If composer.json already exists (source copied into repo), just install deps.
+# Otherwise create the Magento project from scratch.
 COPY --chown=magento:www-data . /var/www/html/
 
-# ── Install Composer dependencies ─────────────────────────────────────────────
 RUN --mount=type=cache,target=/var/cache/composer \
-    composer install \
-      --no-dev \
-      --optimize-autoloader \
-      --no-interaction \
-      --no-progress \
-    && composer clear-cache
+    if [ -f "composer.json" ]; then \
+      echo "composer.json found — installing dependencies..." && \
+      composer install \
+        --no-dev \
+        --optimize-autoloader \
+        --no-interaction \
+        --no-progress && \
+      composer clear-cache; \
+    else \
+      echo "No composer.json — creating Magento 2.4.9 project..." && \
+      composer create-project \
+        --repository-url=https://repo.magento.com/ \
+        magento/project-community-edition=2.4.9 \
+        /tmp/magento-src \
+        --no-dev \
+        --no-interaction && \
+      cp -r /tmp/magento-src/. /var/www/html/ && \
+      rm -rf /tmp/magento-src && \
+      composer clear-cache; \
+    fi
 
 # ── Set permissions ───────────────────────────────────────────────────────────
 RUN find /var/www/html -type f -exec chmod 644 {} \; \

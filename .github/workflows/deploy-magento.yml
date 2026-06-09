@@ -183,6 +183,8 @@ jobs:
             ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:latest
           build-args: |
             MAGENTO_VERSION=2.4.9
+            MAGENTO_PUBLIC_KEY=${{ secrets.MAGENTO_PUBLIC_KEY }}
+            MAGENTO_PRIVATE_KEY=${{ secrets.MAGENTO_PRIVATE_KEY }}
             BUILD_DATE=${{ github.event.head_commit.timestamp }}
             VCS_REF=${{ github.sha }}
           cache-from: type=local,src=/tmp/.buildx-cache
