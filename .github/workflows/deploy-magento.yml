@@ -113,7 +113,10 @@ jobs:
       - name: Set version
         id: version
         run: |
-          VERSION="${{ github.ref_name }}-$(git rev-parse --short HEAD)-$(date +%Y%m%d%H%M%S)"
+          SHORT_SHA=$(git rev-parse --short HEAD)
+          TIMESTAMP=$(date +%Y%m%d%H%M%S)
+          BRANCH=$(echo "${{ github.ref_name }}" | tr '/' '-' | tr '[:upper:]' '[:lower:]')
+          VERSION="${BRANCH}-${SHORT_SHA}-${TIMESTAMP}"
           echo "version=${VERSION}" >> $GITHUB_OUTPUT
           echo "Version: ${VERSION}"
 
@@ -199,13 +202,23 @@ jobs:
             --query taskDefinition > task-definition.json
           echo "Task def: $(python3 -c "import json,sys; d=json.load(open('task-definition.json')); print(d['family']+':'+str(d['revision']))")"
 
+      - name: Compute image URI
+        id: image
+        run: |
+          # Get ECR registry from login step or compute from account
+          ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+          REGION="${{ secrets.AWS_REGION }}"
+          IMAGE="${ACCOUNT_ID}.dkr.ecr.${REGION}.amazonaws.com/${{ env.ECR_REPOSITORY }}:${{ needs.build.outputs.version }}"
+          echo "uri=${IMAGE}" >> $GITHUB_OUTPUT
+          echo "Image: ${IMAGE}"
+
       - name: Inject new image
         id: task-def
         uses: aws-actions/amazon-ecs-render-task-definition@v1
         with:
           task-definition: task-definition.json
           container-name:  ${{ env.CONTAINER_NAME }}
-          image:           ${{ needs.build.outputs.image }}
+          image:           ${{ steps.image.outputs.uri }}
           environment-variables: |
             MAGENTO_BASE_URL=${{ secrets.MAGENTO_BASE_URL }}/
             MAGENTO_DB_HOST=${{ secrets.MAGENTO_DB_HOST }}
