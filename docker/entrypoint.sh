@@ -20,11 +20,44 @@ wait_for_db() {
       log "MySQL ready"
       return 0
     fi
-    log "  Attempt ${i}/60 — retrying in 3s..."
+    log "  Attempt ${i}/60 - retrying in 3s..."
     sleep 3
   done
-  log "ERROR: MySQL not available after 3 minutes — aborting"
+  log "ERROR: MySQL not available after 3 minutes - aborting"
   exit 1
+}
+
+# Ensure database exists and user has all required privileges
+setup_database() {
+  log "Creating database ${MAGENTO_DB_NAME} if not exists..."
+
+  # Connect as the same user - on RDS the user owns its own DB
+  # This also handles the case where DB was pre-created by Terraform
+  php -r "
+    \$host = getenv("MAGENTO_DB_HOST");
+    \$user = getenv("MAGENTO_DB_USER");
+    \$pass = getenv("MAGENTO_DB_PASS");
+    \$db   = getenv("MAGENTO_DB_NAME");
+    try {
+      \$pdo = new PDO("mysql:host=\$host", \$user, \$pass,
+        [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
+      \$pdo->exec("CREATE DATABASE IF NOT EXISTS \`\$db\`
+        CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci");
+      \$pdo->exec("GRANT SELECT,INSERT,UPDATE,DELETE,CREATE,DROP,INDEX,
+        ALTER,CREATE TEMPORARY TABLES,LOCK TABLES,EXECUTE,
+        CREATE VIEW,SHOW VIEW,CREATE ROUTINE,ALTER ROUTINE,TRIGGER
+        ON \`\$db\`.* TO \"\`\$user\`\"@\"%\"  ");
+      \$pdo->exec("FLUSH PRIVILEGES");
+      echo "DB ready\n";
+    } catch(Exception \$e) {
+      // DB may already exist and user may already have grants - continue
+      echo "DB init note: " . \$e->getMessage() . "\n";
+    }
+  " 2>&1 || true
+  log "Database setup complete"
+}
+  " 2>/dev/null
+  log "Database check complete"
 }
 
 # ── Wait for Redis ─────────────────────────────────────────────────────────────
@@ -49,6 +82,18 @@ setup_health() {
 # ── Run Magento setup:install ──────────────────────────────────────────────────
 run_setup_install() {
   log "Running Magento setup:install..."
+
+  # Determine search engine and flags
+  if [ -n "${MAGENTO_ES_HOST}" ]; then
+    SEARCH_FLAGS="--search-engine=opensearch \
+      --opensearch-host=${MAGENTO_ES_HOST} \
+      --opensearch-port=${MAGENTO_ES_PORT:-9200} \
+      --opensearch-index-prefix=magento2"
+  else
+    # Fallback: use MySQL fulltext search (no external search needed)
+    SEARCH_FLAGS="--search-engine=mysql"
+  fi
+
   php "${MAGENTO_ROOT}/bin/magento" setup:install \
     --base-url="${MAGENTO_BASE_URL:-http://localhost/}" \
     --db-host="${MAGENTO_DB_HOST}" \
@@ -68,11 +113,10 @@ run_setup_install() {
     --use-secure=0 \
     --use-secure-admin=0 \
     --backend-frontname="${MAGENTO_ADMIN_PATH:-admin}" \
-    --search-engine=elasticsearch7 \
-    --elasticsearch-host="${MAGENTO_ES_HOST:-localhost}" \
-    --elasticsearch-port="${MAGENTO_ES_PORT:-9200}" \
     --session-save="db" \
+    ${SEARCH_FLAGS} \
     --no-interaction
+
   log "setup:install complete"
 }
 
