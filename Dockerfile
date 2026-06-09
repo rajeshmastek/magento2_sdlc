@@ -41,10 +41,7 @@ ENV COMPOSER_ALLOW_SUPERUSER=1 \
 WORKDIR /var/www/html
 
 RUN composer config --global http-basic.repo.magento.com "${MAGENTO_PUBLIC_KEY}" "${MAGENTO_PRIVATE_KEY}" \
-  && composer create-project --repository-url=https://repo.magento.com magento/project-community-edition . \
-  && composer clear-cache \
-  # Remove credentials from final image
-  && rm -f ~/.composer/auth.json
+  && composer create-project --repository-url=https://repo.magento.com magento/project-community-edition .
 
 # ── Copy custom modules ───────────────────────────────────────────────────────
 COPY app/code/ /var/www/html/app/code/
