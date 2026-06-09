@@ -178,9 +178,9 @@ jobs:
           push:      true
           platforms: linux/amd64
           tags: |
-            ${{ needs.resolve-infra.outputs.ecr_registry }}/${{ env.ECR_REPOSITORY }}:${{ steps.version.outputs.version }}
-            ${{ needs.resolve-infra.outputs.ecr_registry }}/${{ env.ECR_REPOSITORY }}:${{ github.ref_name }}-latest
-            ${{ needs.resolve-infra.outputs.ecr_registry }}/${{ env.ECR_REPOSITORY }}:latest
+            ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ steps.version.outputs.version }}
+            ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ github.ref_name }}-latest
+            ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:latest
           build-args: |
             MAGENTO_VERSION=2.4.9
             BUILD_DATE=${{ github.event.head_commit.timestamp }}
@@ -196,7 +196,7 @@ jobs:
       - name: Set image output
         id: set-image
         run: |
-          IMAGE="${{ needs.resolve-infra.outputs.ecr_registry }}/${{ env.ECR_REPOSITORY }}:${{ steps.version.outputs.version }}"
+          IMAGE="${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ steps.version.outputs.version }}"
           echo "image=${IMAGE}" >> $GITHUB_OUTPUT
           echo "Image: ${IMAGE}"
 
