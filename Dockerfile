@@ -93,7 +93,9 @@ RUN find /var/www/html -type f -exec chmod 644 {} \; \
        /var/www/html/var \
        /var/www/html/pub \
        /var/www/html/generated \
-       /var/www/html/app/etc
+       /var/www/html/app/etc \
+  && mkdir -p /var/log/supervisor /run/php \
+  && touch /run/php/php-fpm.sock
 
 # ── Supervisor configuration ──────────────────────────────────────────────────
 COPY docker/supervisord.conf /etc/supervisor/conf.d/supervisord.conf
