@@ -221,13 +221,6 @@ jobs:
           image:           ${{ steps.image.outputs.uri }}
           environment-variables: |
             MAGENTO_BASE_URL=${{ secrets.MAGENTO_BASE_URL }}/
-            MAGENTO_DB_HOST=${{ secrets.MAGENTO_DB_HOST }}
-            MAGENTO_DB_NAME=${{ secrets.MAGENTO_DB_NAME }}
-            MAGENTO_DB_USER=${{ secrets.MAGENTO_DB_USER }}
-            MAGENTO_DB_PASS=${{ secrets.MAGENTO_DB_PASS }}
-            MAGENTO_ADMIN_USER=${{ secrets.MAGENTO_ADMIN_USER }}
-            MAGENTO_ADMIN_PASS=${{ secrets.MAGENTO_ADMIN_PASS }}
-            MAGENTO_ADMIN_EMAIL=${{ secrets.MAGENTO_ADMIN_EMAIL }}
             MAGENTO_REDIS_HOST=${{ secrets.MAGENTO_REDIS_HOST }}
             MAGENTO_ES_HOST=${{ secrets.MAGENTO_ES_HOST }}
             MAGENTO_ES_PORT=9200
