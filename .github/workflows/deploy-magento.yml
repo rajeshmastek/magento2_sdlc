@@ -175,7 +175,7 @@ jobs:
     needs: [resolve-infra, build]
     environment:
       name: ${{ github.event.inputs.environment || 'staging' }}
-      url:  ${{ needs.resolve-infra.outputs.magento_url }}
+      url:  ${{ secrets.MAGENTO_BASE_URL }}
 
     steps:
       - name: Checkout
@@ -195,7 +195,7 @@ jobs:
       - name: Fetch task definition
         run: |
           aws ecs describe-task-definition \
-            --task-definition "${{ needs.resolve-infra.outputs.task_family }}" \
+            --task-definition "${{ secrets.ECS_TASK_FAMILY }}" \
             --query taskDefinition > task-definition.json
           echo "Task def: $(python3 -c "import json,sys; d=json.load(open('task-definition.json')); print(d['family']+':'+str(d['revision']))")"
 
@@ -207,7 +207,7 @@ jobs:
           container-name:  ${{ env.CONTAINER_NAME }}
           image:           ${{ needs.build.outputs.image }}
           environment-variables: |
-            MAGENTO_BASE_URL=${{ needs.resolve-infra.outputs.magento_url }}/
+            MAGENTO_BASE_URL=${{ secrets.MAGENTO_BASE_URL }}/
             MAGENTO_DB_HOST=${{ secrets.MAGENTO_DB_HOST }}
             MAGENTO_DB_NAME=${{ secrets.MAGENTO_DB_NAME }}
             MAGENTO_DB_USER=${{ secrets.MAGENTO_DB_USER }}
@@ -261,9 +261,9 @@ jobs:
           | | |
           |---|---|
           | Version | ${{ needs.build.outputs.version }} |
-          | URL | ${{ needs.resolve-infra.outputs.magento_url }} |
-          | Cluster | ${{ needs.resolve-infra.outputs.cluster }} |
-          | Service | ${{ needs.resolve-infra.outputs.service }} |
+          | URL | ${{ secrets.MAGENTO_BASE_URL }} |
+          | Cluster | ${{ secrets.ECS_CLUSTER }} |
+          | Service | ${{ secrets.ECS_SERVICE }} |
           | Commit | ${{ github.sha }} |
           SUMMARY
 
@@ -302,7 +302,7 @@ jobs:
       - name: Run smoke tests
         working-directory: playwright
         env:
-          BASE_URL:               ${{ needs.resolve-infra.outputs.magento_url }}
+          BASE_URL:               ${{ secrets.MAGENTO_BASE_URL }}
           MAGENTO_ADMIN_USER:     ${{ secrets.MAGENTO_ADMIN_USER }}
           MAGENTO_ADMIN_PASS:     ${{ secrets.MAGENTO_ADMIN_PASS }}
           MAGENTO_CUSTOMER_EMAIL: ${{ secrets.MAGENTO_CUSTOMER_EMAIL }}
