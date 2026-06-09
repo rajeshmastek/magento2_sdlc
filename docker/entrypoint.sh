@@ -71,15 +71,23 @@ run_setup_install() {
     --search-engine=elasticsearch7 \
     --elasticsearch-host="${MAGENTO_ES_HOST:-localhost}" \
     --elasticsearch-port="${MAGENTO_ES_PORT:-9200}" \
-    --session-save="${MAGENTO_SESSION_SAVE:-db}" \
+    --session-save="db" \
     --no-interaction
   log "setup:install complete"
 }
 
-# ── Configure Redis (if available) ─────────────────────────────────────────────
+
+# Configure Redis only if host is set AND reachable
 configure_redis() {
-  if [ -z "${MAGENTO_REDIS_HOST}" ]; then return 0; fi
-  log "Configuring Redis..."
+  if [ -z "${MAGENTO_REDIS_HOST}" ]; then
+    log "MAGENTO_REDIS_HOST not set - skipping Redis, using file cache"
+    return 0
+  fi
+  if ! redis-cli -h "${MAGENTO_REDIS_HOST}" -p 6379 ping 2>/dev/null | grep -q PONG; then
+    log "WARNING: Cannot reach Redis at ${MAGENTO_REDIS_HOST} - skipping Redis config"
+    return 0
+  fi
+  log "Configuring Redis at ${MAGENTO_REDIS_HOST}..."
   php "${MAGENTO_ROOT}/bin/magento" setup:config:set \
     --cache-backend=redis \
     --cache-backend-redis-server="${MAGENTO_REDIS_HOST}" \
@@ -90,7 +98,7 @@ configure_redis() {
     --session-save=redis \
     --session-save-redis-host="${MAGENTO_REDIS_HOST}" \
     --session-save-redis-db=2 \
-    --no-interaction 2>/dev/null || log "WARNING: Redis config failed — using default cache"
+    --no-interaction 2>/dev/null || log "WARNING: Redis config failed - using db sessions"
 }
 
 # ── Enable custom modules ──────────────────────────────────────────────────────

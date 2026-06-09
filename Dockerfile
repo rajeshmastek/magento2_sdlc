@@ -1,7 +1,7 @@
 # ──────────────────────────────────────────────────────────────────────────────
 # Magento 2.4.9 — source files in repo, setup:install runs at container start
 # ──────────────────────────────────────────────────────────────────────────────
-FROM php:8.3-fpm-bookworm
+FROM php:8.4-fpm-bookworm
 
 LABEL maintainer="SDLC AI Platform"
 
@@ -11,7 +11,7 @@ ARG MAGENTO_VERSION=2.4.9
 RUN apt-get update && apt-get install -y --no-install-recommends \
     nginx supervisor libfreetype6-dev libjpeg62-turbo-dev libpng-dev \
     libwebp-dev libicu-dev libxml2-dev libxslt-dev libzip-dev \
-    libsodium-dev libonig-dev curl git unzip cron \
+    libsodium-dev libonig-dev curl git unzip cron redis-tools \
   && rm -rf /var/lib/apt/lists/*
 
 # ── PHP extensions ────────────────────────────────────────────────────────────
