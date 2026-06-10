@@ -90,10 +90,12 @@ configure_redis() {
 run_setup_install() {
   log "Running Magento setup:install..."
 
-  # Always use mysql for setup:install - avoids OpenSearch connectivity issues
-  # OpenSearch is configured after install via configure_search()
-  SEARCH_FLAGS="--search-engine=mysql"
-  log "Using mysql search engine for setup:install"
+  # Magento 2.4.x requires opensearch or elasticsearch7 - mysql not supported
+  # Use opensearch with --skip-db-validation to avoid connectivity check during install
+  ES_HOST="${MAGENTO_ES_HOST:-localhost}"
+  ES_PORT="${MAGENTO_ES_PORT:-9200}"
+  SEARCH_FLAGS="--search-engine=opensearch --opensearch-host=${ES_HOST} --opensearch-port=${ES_PORT} --opensearch-index-prefix=magento2 --skip-db-validation"
+  log "Using opensearch at ${ES_HOST}:${ES_PORT} (validation skipped)"
 
   php "${MAGENTO_ROOT}/bin/magento" setup:install \
     --base-url="${MAGENTO_BASE_URL:-http://localhost/}" \
