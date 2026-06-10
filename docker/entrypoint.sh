@@ -90,12 +90,10 @@ configure_redis() {
 run_setup_install() {
   log "Running Magento setup:install..."
 
-  # Set search engine flags
-  if [ -n "${MAGENTO_ES_HOST}" ]; then
-    SEARCH_FLAGS="--search-engine=opensearch --opensearch-host=${MAGENTO_ES_HOST} --opensearch-port=${MAGENTO_ES_PORT:-9200} --opensearch-index-prefix=magento2"
-  else
-    SEARCH_FLAGS="--search-engine=mysql"
-  fi
+  # Always use mysql for setup:install - avoids OpenSearch connectivity issues
+  # OpenSearch is configured after install via configure_search()
+  SEARCH_FLAGS="--search-engine=mysql"
+  log "Using mysql search engine for setup:install"
 
   php "${MAGENTO_ROOT}/bin/magento" setup:install \
     --base-url="${MAGENTO_BASE_URL:-http://localhost/}" \
@@ -195,6 +193,7 @@ else
   setup_database
   run_setup_install
   configure_redis
+  configure_search
   enable_modules
   install_sample_data
   run_upgrade
